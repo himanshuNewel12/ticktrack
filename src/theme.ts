@@ -4,18 +4,19 @@ import { Appearance, StyleSheet, useColorScheme } from "react-native";
 export type ColorScheme = "light" | "dark";
 
 export const ACCENT_COLORS = [
-  { name: "TickTick Blue", hex: "#3B82F6", secondary: "#2563EB", tertiary: "#EFF6FF", onTertiary: "#1D4ED8" },
-  { name: "Royal Indigo", hex: "#6366F1", secondary: "#4F46E5", tertiary: "#EEF2FF", onTertiary: "#3730A3" },
-  { name: "Violet Purple", hex: "#8B5CF6", secondary: "#7C3AED", tertiary: "#F5F3FF", onTertiary: "#5B21B6" },
-  { name: "Emerald Green", hex: "#10B981", secondary: "#059669", tertiary: "#ECFDF5", onTertiary: "#065F46" },
-  { name: "Sunset Orange", hex: "#F97316", secondary: "#EA580C", tertiary: "#FFF7ED", onTertiary: "#9A3412" },
-  { name: "Rose Pink", hex: "#EC4899", secondary: "#DB2777", tertiary: "#FDF2F8", onTertiary: "#9D174D" },
+  { name: "Electric Blue", hex: "#3B82F6", secondary: "#2563EB", tertiary: "#EFF6FF", onTertiary: "#1D4ED8" },
+  { name: "Sky Cyan", hex: "#38BDF8", secondary: "#0284C7", tertiary: "#F0F9FF", onTertiary: "#0369A1" },
+  { name: "Mint Teal", hex: "#34D399", secondary: "#059669", tertiary: "#ECFDF5", onTertiary: "#065F46" },
+  { name: "Sage Lime", hex: "#A3E635", secondary: "#65A30D", tertiary: "#F7FEE7", onTertiary: "#4D7C0F" },
+  { name: "Warm Peach", hex: "#FBBF24", secondary: "#D97706", tertiary: "#FFFBEB", onTertiary: "#B45309" },
+  { name: "Soft Pink", hex: "#F472B6", secondary: "#DB2777", tertiary: "#FDF2F8", onTertiary: "#BE185D" },
+  { name: "Royal Purple", hex: "#A855F7", secondary: "#7E22CE", tertiary: "#FAF5FF", onTertiary: "#6B21A8" },
 ];
 
 export const light = {
-  surface: "#FAFAFC",
+  surface: "#FFFFFF",
   onSurface: "#111827",
-  surfaceSecondary: "#F3F4F6",
+  surfaceSecondary: "#F2F4F8",
   onSurfaceSecondary: "#374151",
   surfaceTertiary: "#E5E7EB",
   onSurfaceTertiary: "#4B5563",
@@ -41,9 +42,9 @@ export const light = {
   info: "#3B82F6",
   onInfo: "#FFFFFF",
 
-  border: "#E5E7EB",
-  borderStrong: "#D1D5DB",
-  divider: "#E5E7EB",
+  border: "#EEF2F6",
+  borderStrong: "#CBD5E1",
+  divider: "#F1F5F9",
 };
 
 export const dark = {
@@ -88,7 +89,7 @@ export const themes: { light: ThemeColors; dark: ThemeColors } = { light, dark }
 
 import { storage } from "@/src/utils/storage";
 
-let currentAccent = ACCENT_COLORS[2];
+let currentAccent = ACCENT_COLORS[0];
 let currentMode: "light" | "dark" | "system" = "light";
 
 const listeners = new Set<() => void>();
@@ -106,7 +107,7 @@ export function setAppTheme(mode: "light" | "dark" | "system", accentHex?: strin
 
 export async function initAppTheme() {
   const savedMode = await storage.getItem("ticktrack_theme_mode", "light");
-  const savedAccent = await storage.getItem("ticktrack_theme_accent", ACCENT_COLORS[2].hex);
+  const savedAccent = await storage.getItem("ticktrack_theme_accent", ACCENT_COLORS[0].hex);
   if (savedMode) currentMode = savedMode as any;
   if (savedAccent) {
     const found = ACCENT_COLORS.find((c) => c.hex.toLowerCase() === savedAccent.toLowerCase());

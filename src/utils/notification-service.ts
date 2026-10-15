@@ -1,22 +1,29 @@
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import { Platform } from "react-native";
-import { parseTaskDate } from "./date-utils";
+import { parseTaskDate, formatTaskDueDateDisplay } from "./date-utils";
 import type { Task } from "../types";
 
-let Notifications: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  Notifications = require("expo-notifications");
-  if (Notifications && typeof Notifications.setNotificationHandler === "function") {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-      }),
-    });
+export const isExpoGo =
+  Constants.appOwnership === "expo" ||
+  Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+
+export let Notifications: any = null;
+if (!isExpoGo) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    Notifications = require("expo-notifications");
+    if (Notifications && typeof Notifications.setNotificationHandler === "function") {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
+      });
+    }
+  } catch {
+    Notifications = null;
   }
-} catch {
-  Notifications = null;
 }
 
 /**
@@ -58,6 +65,77 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 }
 
 /**
+ * Request notification permissions and register for an Expo Push Token.
+ * Returns the token string (ExponentPushToken[...]) if successful.
+ * Remote push notifications require a development build or standalone build in SDK 53+.
+ */
+export async function registerForPushNotificationsAsync(): Promise<string | null> {
+  if (Platform.OS === "web" || isExpoGo) {
+    if (isExpoGo) {
+      console.log(
+        "[PushNotifications] Expo Go does not support remote push notifications in SDK 53+. " +
+        "Remote push notifications will activate in development / standalone builds."
+      );
+    }
+    return null;
+  }
+
+  try {
+    if (!Notifications) return null;
+
+    await setupNotificationChannel();
+
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== "granted") {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+
+    if (finalStatus !== "granted") {
+      return null;
+    }
+
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      (Constants as any).easConfig?.projectId ??
+      "2512b94e-a398-44b6-9c8b-274432555fd7";
+
+    const tokenResponse = await Notifications.getExpoPushTokenAsync({
+      projectId,
+    });
+
+    const pushToken = tokenResponse?.data;
+    return pushToken || null;
+  } catch (error) {
+    console.warn("Could not register for push notifications:", error);
+    return null;
+  }
+}
+
+/**
+ * Formats a user-friendly reminder description based on due time and reminder offset.
+ */
+export function getReminderDescription(reminderType: string, dueStr: string): string {
+  const normType = (reminderType || "").toLowerCase();
+  const dueDisplay = formatTaskDueDateDisplay(dueStr);
+
+  if (normType === "on_due") {
+    return dueDisplay ? `Task is due now! (${dueDisplay})` : "Task is due now!";
+  }
+  if (normType.includes("1_hour") || normType.includes("1hour")) {
+    return dueDisplay ? `Upcoming in 1 hour (${dueDisplay})` : "Upcoming task due in 1 hour!";
+  }
+  if (normType.includes("1_day") || normType.includes("1day")) {
+    return dueDisplay ? `Upcoming tomorrow (${dueDisplay})` : "Upcoming task due tomorrow!";
+  }
+  if (normType.includes("3_day") || normType.includes("3day")) {
+    return dueDisplay ? `Upcoming in 3 days (${dueDisplay})` : "Upcoming task due in 3 days!";
+  }
+  return dueDisplay ? `Upcoming in 15 minutes (${dueDisplay})` : "Upcoming task due in 15 minutes!";
+}
+
+/**
  * Calculates the reminder Date for a task.
  * Default: 15 minutes before the task due date/time (Teams meeting style).
  */
@@ -67,9 +145,15 @@ export function calculateReminderTime(dueStr: string, reminderType: string = "15
 
   const targetDate = new Date(parsed);
 
-  // If date-only string (no time component specified), default due time is 9:00 AM on due date
+  // If date-only string (no time component specified), default due time is end of workday (18:00)
+  // or if today and it's already evening, 21:00
   if (!dueStr.includes("T")) {
-    targetDate.setHours(9, 0, 0, 0);
+    const now = new Date();
+    if (parsed.toDateString() === now.toDateString() && now.getHours() >= 17) {
+      targetDate.setHours(21, 0, 0, 0);
+    } else {
+      targetDate.setHours(18, 0, 0, 0);
+    }
   }
 
   const normType = (reminderType || "").toLowerCase();
@@ -86,8 +170,9 @@ export function calculateReminderTime(dueStr: string, reminderType: string = "15
 
   const reminderTime = new Date(targetDate.getTime() - offsetMinutes * 60 * 1000);
 
-  // Only schedule if the reminder time is in the future
-  if (reminderTime.getTime() > Date.now()) {
+  // Only schedule if the reminder time is in the future (at least 15 seconds ahead)
+  // This prevents past or immediate tasks from accidentally firing notification upon creation
+  if (reminderTime.getTime() > Date.now() + 15000) {
     return reminderTime;
   }
 
@@ -114,18 +199,26 @@ export async function scheduleTaskNotification(task: Task): Promise<string[] | n
       const reminderDate = calculateReminderTime(task.due_date, reminderType);
       if (!reminderDate) continue;
 
-      const triggerSeconds = Math.max(1, Math.floor((reminderDate.getTime() - Date.now()) / 1000));
+      const timingDesc = getReminderDescription(reminderType, task.due_date);
+      const bodyText = task.notes && task.notes.trim()
+        ? `${timingDesc}\n${task.notes.trim().slice(0, 100)}`
+        : timingDesc;
+
+      // In expo-notifications SDK 50+, use SchedulableTriggerInputTypes.DATE to avoid immediate trigger
+      const triggerInput = {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: reminderDate,
+        channelId: "task-reminders",
+      };
 
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title: `⏰ Task Reminder: ${task.title}`,
-          body: task.notes ? task.notes.slice(0, 100) : `Upcoming task due in 15 minutes!`,
+          body: bodyText,
           sound: "default",
           data: { taskId: task.id },
         },
-        trigger: Platform.OS === "android"
-          ? { channelId: "task-reminders", seconds: triggerSeconds }
-          : { seconds: triggerSeconds },
+        trigger: triggerInput,
       });
 
       if (notificationId) {
@@ -186,6 +279,18 @@ export async function cancelTaskNotification(taskId: string): Promise<void> {
       if (item.content?.data?.taskId === taskId) {
         await Notifications.cancelScheduledNotificationAsync(item.identifier);
       }
+    }
+  } catch {}
+}
+
+/**
+ * Cancel all scheduled notifications (used on sign-out).
+ */
+export async function cancelAllTaskNotifications(): Promise<void> {
+  if (Platform.OS === "web" || !Notifications) return;
+  try {
+    if (Notifications.cancelAllScheduledNotificationsAsync) {
+      await Notifications.cancelAllScheduledNotificationsAsync();
     }
   } catch {}
 }

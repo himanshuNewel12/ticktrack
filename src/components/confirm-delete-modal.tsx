@@ -21,7 +21,7 @@ type Props = {
 export function ConfirmDeleteModal({
   visible,
   title = "Delete list?",
-  message = "Are you sure you want to delete this list? Tasks in this list will remain available in All Tasks.",
+  message = "Are you sure you want to delete this list? Tasks in this list will remain available in All Dates.",
   confirmText = "Delete",
   cancelText = "Cancel",
   loading = false,

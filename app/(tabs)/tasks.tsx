@@ -1,8 +1,8 @@
 import { Ionicons as BaseIonicons } from "@expo/vector-icons";
 import { addDays, formatDistanceToNow, isBefore, parseISO, startOfDay, format } from "date-fns";
 import { router } from "expo-router";
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
-import { Alert, Animated, ColorValue, Image, Modal, PanResponder, Pressable, ScrollView, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { Alert, Animated, ColorValue, Image, Modal, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, Share, Switch, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const isImageUri = (url?: string | null) => {
@@ -15,13 +15,16 @@ import { TaskComposer, type ComposerKind } from "@/src/components/task-composer"
 import { ConfirmDeleteModal } from "@/src/components/confirm-delete-modal";
 import { ConfirmSignOutModal } from "@/src/components/confirm-sign-out-modal";
 import { TaskDetailModal } from "@/src/components/task-detail-modal";
+import { TaskEditModal } from "@/src/components/task-edit-modal";
+import { NotificationsModal } from "@/src/components/notifications-modal";
+import { PostponeActivityModal } from "@/src/components/postpone-activity-modal";
 import { useApp } from "@/src/app-context";
 import { makeStyles, useTheme } from "@/src/theme";
 import type { Reminder, Task, TaskList } from "@/src/types";
 import { playPopSound } from "@/src/utils/sound";
 import { parseTaskDate, getTaskTimestamp, getUpcomingTaskTimestamp, formatTaskDueDateDisplay } from "@/src/utils/date-utils";
 
-type LooseIconProps = { name: string; size: number; color?: ColorValue };
+type LooseIconProps = { name: string; size: number; color?: ColorValue; style?: any };
 const Ionicons = BaseIonicons as unknown as ComponentType<LooseIconProps>;
 
 const REMINDER_LABELS: Record<string, string> = {
@@ -32,14 +35,14 @@ const REMINDER_LABELS: Record<string, string> = {
 };
 const PRIORITY_LABELS: Record<string, string> = { low: "Low", medium: "Medium", high: "High" };
 
-type SmartKey = "today" | "tomorrow" | "next7" | "all" | "completed";
+type SmartKey = "all" | "today" | "tomorrow" | "next7" | "completed";
 type SmartList = { key: SmartKey; label: string; icon: string; hint: string; empty: { title: string; copy: string } };
 
 const SMART_LISTS: SmartList[] = [
-  { key: "today", label: "Today", icon: "sunny-outline", hint: "Due today", empty: { title: "You're all clear for today", copy: "Enjoy the calm or capture a fresh idea." } },
+  { key: "all", label: "All Dates", icon: "calendar-outline", hint: "All dates", empty: { title: "Nothing captured yet", copy: "Tap + to start your first task." } },
+  { key: "today", label: "Today", icon: "sunny-outline", hint: "Due today & overdue", empty: { title: "You're all clear for today", copy: "Enjoy the calm or capture a fresh idea." } },
   { key: "tomorrow", label: "Tomorrow", icon: "partly-sunny-outline", hint: "Due tomorrow", empty: { title: "Nothing lined up tomorrow", copy: "A soft landing awaits." } },
   { key: "next7", label: "Next 7 Days", icon: "calendar-outline", hint: "Due in the next week", empty: { title: "A gentle week ahead", copy: "Plan what matters when you're ready." } },
-  { key: "all", label: "All Tasks", icon: "layers-outline", hint: "Everything active", empty: { title: "Nothing captured yet", copy: "Tap + to start your first task." } },
   { key: "completed", label: "Completed", icon: "checkmark-done-outline", hint: "Recently finished", empty: { title: "No wins yet", copy: "Every finished task will land here." } },
 ];
 
@@ -49,12 +52,65 @@ export default function TasksScreen() {
   const styles = useStyles();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { user, tasks, reminders, lists, toggleTask, deleteTask, dismissReminder, signOut, deleteList } = useApp();
+  const {
+    user,
+    tasks,
+    reminders,
+    lists,
+    assignableUsers,
+    toggleTask,
+    deleteTask,
+    editTask,
+    dismissReminder,
+    signOut,
+    deleteList,
+    notifications,
+    unreadNotificationCount,
+    refresh,
+  } = useApp();
   const [composer, setComposer] = useState<ComposerKind | null>(null);
   const inboxList = useMemo(() => lists.find((item) => item.system), [lists]);
-  const [selection, setSelection] = useState<Selection>({ kind: "smart", key: "today" });
+  const [selection, setSelection] = useState<Selection>({ kind: "smart", key: "all" });
+  const [allDatesScope, setAllDatesScope] = useState<"all" | "mine" | "other">("all");
+  const [selectedOtherAssignee, setSelectedOtherAssignee] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [notificationsModal, setNotificationsModal] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
+
+  // Periodic background refresh every 20s so new tasks from planner frontend appear automatically
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void refresh();
+    }, 20000);
+    return () => clearInterval(timer);
+  }, [refresh]);
+
+  // Menu action modals
+  const [filterModal, setFilterModal] = useState(false);
+  const [viewOptionsModal, setViewOptionsModal] = useState(false);
+  const [arrangeModal, setArrangeModal] = useState(false);
+  const [employeeSearchModal, setEmployeeSearchModal] = useState(false);
+
+  // Filters & Arrange state
+  const [filterPriority, setFilterPriority] = useState<string>("all");
+  const [filterAssignee, setFilterAssignee] = useState<string>("all");
+  const [arrangeBy, setArrangeBy] = useState<"due_date" | "priority" | "title" | "created">("due_date");
+
+  // View Options state
+  const [showOverdueSection, setShowOverdueSection] = useState(true);
+  const [showCompletedSection, setShowCompletedSection] = useState(true);
+  const [showDetails, setShowDetails] = useState(true);
+  const [showTime, setShowTime] = useState(true);
 
   const displayName = useMemo(() => {
     if (!user) return "User";
@@ -68,17 +124,212 @@ export default function TasksScreen() {
     return "User";
   }, [user]);
 
-  const [showCompletedSection, setShowCompletedSection] = useState(true);
-  const [detailTask, setDetailTask] = useState<Task | null>(null);
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
+  const detailTask = useMemo(() => tasks.find((t) => t.id === detailTaskId) ?? null, [tasks, detailTaskId]);
+  const setDetailTask = useCallback((t: Task | null) => setDetailTaskId(t ? t.id : null), []);
+  const [editModalTask, setEditModalTask] = useState<Task | null>(null);
+  const [postponeModalTask, setPostponeModalTask] = useState<Task | null>(null);
   const [toast, setToast] = useState<{ visible: boolean; taskId: string | null; action: "completed" | "restored" }>({ visible: false, taskId: null, action: "completed" });
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const otherAssignees = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; count: number }>();
+    for (const t of tasks) {
+      if (t.completed) continue;
+      const isMine = Boolean(
+        user?.id && (
+          t.assigneeId === user.id ||
+          t.assignee_id === user.id ||
+          t.assignee?.id === user.id ||
+          (Array.isArray(t.assigneeIds) && t.assigneeIds.includes(user.id))
+        )
+      );
+      if (isMine) continue;
+
+      const assignedList: { id: string; name: string }[] = [];
+      if (t.assignee && t.assignee.id) {
+        const name = `${t.assignee.firstName ?? ""} ${t.assignee.lastName ?? ""}`.trim() || t.assignee.email || t.assigneeName || "Unknown";
+        assignedList.push({ id: t.assignee.id, name });
+      } else if (t.assigneeId || t.assignee_id) {
+        const aid = (t.assigneeId || t.assignee_id)!;
+        const u = assignableUsers.find((usr) => usr.id === aid);
+        const name = u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email : t.assigneeName || "Unknown";
+        assignedList.push({ id: aid, name });
+      } else if (Array.isArray(t.assigneeIds) && t.assigneeIds.length > 0) {
+        for (const aid of t.assigneeIds) {
+          if (aid === user?.id) continue;
+          const u = assignableUsers.find((usr) => usr.id === aid);
+          const name = u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email : t.assigneeName || "Unknown";
+          assignedList.push({ id: aid, name });
+        }
+      } else if (t.assigneeName) {
+        assignedList.push({ id: t.assigneeName, name: t.assigneeName });
+      }
+
+      for (const a of assignedList) {
+        const existing = map.get(a.id);
+        if (existing) {
+          existing.count++;
+        } else {
+          map.set(a.id, { id: a.id, name: a.name, count: 1 });
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [tasks, user?.id, assignableUsers]);
+
   const activeListDoc = selection.kind === "list" ? lists.find((item) => item.id === selection.id) : null;
   const activeSmart = selection.kind === "smart" ? SMART_LISTS.find((item) => item.key === selection.key) : null;
-  const headerTitle = activeListDoc?.name ?? activeSmart?.label ?? "Tasks";
+  const headerTitle = useMemo(() => {
+    if (selection.kind === "list") return activeListDoc?.name ?? "Tasks";
+    if (selection.key === "all") {
+      if (allDatesScope === "other" && selectedOtherAssignee) {
+        const found = otherAssignees.find(
+          (a) => a.id === selectedOtherAssignee || a.name === selectedOtherAssignee
+        );
+        return found?.name ?? selectedOtherAssignee;
+      }
+      return "All Dates";
+    }
+    return activeSmart?.label ?? "Tasks";
+  }, [selection, activeListDoc, activeSmart, allDatesScope, selectedOtherAssignee, otherAssignees]);
 
-  const activeTasks = useMemo(() => filterActiveTasks(tasks, selection, user?.id), [tasks, selection, user?.id]);
+  const { assignedToMeCount, otherCount } = useMemo(() => {
+    let mine = 0;
+    let other = 0;
+    for (const t of tasks) {
+      if (t.completed) continue;
+      const isMine = Boolean(
+        user?.id && (
+          t.assigneeId === user.id ||
+          t.assignee_id === user.id ||
+          t.assignee?.id === user.id ||
+          (Array.isArray(t.assigneeIds) && t.assigneeIds.includes(user.id))
+        )
+      );
+      if (isMine) {
+        mine++;
+      } else {
+        other++;
+      }
+    }
+    return { assignedToMeCount: mine, otherCount: other };
+  }, [tasks, user?.id]);
+
+  const activeTasks = useMemo(() => {
+    let result = filterActiveTasks(tasks, selection, user?.id);
+
+    // Filter All Dates by Assignee Scope (Assigned to me vs Other)
+    if (selection.kind === "smart" && selection.key === "all") {
+      if (allDatesScope === "mine" && user?.id) {
+        result = result.filter(
+          (t) =>
+            t.assigneeId === user.id ||
+            t.assignee_id === user.id ||
+            t.assignee?.id === user.id ||
+            (Array.isArray(t.assigneeIds) && t.assigneeIds.includes(user.id))
+        );
+      } else if (allDatesScope === "other" && user?.id) {
+        if (selectedOtherAssignee) {
+          result = result.filter((t) => {
+            const name = t.assignee ? `${t.assignee.firstName ?? ""} ${t.assignee.lastName ?? ""}`.trim() : t.assigneeName;
+            const matchesId =
+              t.assigneeId === selectedOtherAssignee ||
+              t.assignee_id === selectedOtherAssignee ||
+              t.assignee?.id === selectedOtherAssignee ||
+              (Array.isArray(t.assigneeIds) && t.assigneeIds.includes(selectedOtherAssignee));
+            const matchesName = name === selectedOtherAssignee;
+            return matchesId || matchesName;
+          });
+        } else {
+          result = result.filter(
+            (t) =>
+              t.assigneeId !== user.id &&
+              t.assignee_id !== user.id &&
+              t.assignee?.id !== user.id &&
+              (!Array.isArray(t.assigneeIds) || !t.assigneeIds.includes(user.id))
+          );
+        }
+      }
+    }
+
+    // Filter by Priority
+    if (filterPriority !== "all") {
+      result = result.filter((t) => (t.priority || "none").toLowerCase() === filterPriority);
+    }
+
+    // Filter by Assignee
+    if (filterAssignee !== "all") {
+      result = result.filter((t) => {
+        const name = t.assignee ? `${t.assignee.firstName ?? ""} ${t.assignee.lastName ?? ""}`.trim() : t.assigneeName;
+        const matchesId =
+          t.assigneeId === filterAssignee ||
+          t.assignee_id === filterAssignee ||
+          t.assignee?.id === filterAssignee ||
+          (Array.isArray(t.assigneeIds) && t.assigneeIds.includes(filterAssignee));
+        return name === filterAssignee || matchesId;
+      });
+    }
+
+    // Overdue tasks should always appear on top
+    const sortWithOverdueOnTop = (arr: Task[], compareFn: (a: Task, b: Task) => number) => {
+      return [...arr].sort((a, b) => {
+        const aOver = isTaskOverdue(a);
+        const bOver = isTaskOverdue(b);
+        if (aOver && !bOver) return -1;
+        if (!aOver && bOver) return 1;
+        return compareFn(a, b);
+      });
+    };
+
+    // Arrange / Sort
+    if (arrangeBy === "priority") {
+      const pRank: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, none: 0 };
+      result = sortWithOverdueOnTop(result, (a, b) => (pRank[(b.priority || "none").toLowerCase()] ?? 0) - (pRank[(a.priority || "none").toLowerCase()] ?? 0));
+    } else if (arrangeBy === "title") {
+      result = sortWithOverdueOnTop(result, (a, b) => a.title.localeCompare(b.title));
+    } else if (arrangeBy === "created") {
+      result = sortWithOverdueOnTop(result, (a, b) => getTaskTimestamp(b) - getTaskTimestamp(a));
+    } else {
+      result = sortWithOverdueOnTop(result, (a, b) => getUpcomingTaskTimestamp(a) - getUpcomingTaskTimestamp(b));
+    }
+
+    return result;
+  }, [tasks, selection, user?.id, allDatesScope, selectedOtherAssignee, filterPriority, filterAssignee, arrangeBy]);
+
+  const { overdueTasks, regularTasks } = useMemo(() => {
+    if (selection.kind === "smart" && selection.key === "completed") {
+      return { overdueTasks: [], regularTasks: activeTasks };
+    }
+    const overdue: Task[] = [];
+    const regular: Task[] = [];
+    for (const t of activeTasks) {
+      if (isTaskOverdue(t)) {
+        overdue.push(t);
+      } else {
+        regular.push(t);
+      }
+    }
+    return { overdueTasks: overdue, regularTasks: regular };
+  }, [activeTasks, selection]);
+
   const completedTasks = useMemo(() => filterCompletedTasks(tasks, selection), [tasks, selection]);
+
+  const handleShareList = async () => {
+    setMenu(false);
+    try {
+      const itemsText = activeTasks.length
+        ? activeTasks
+            .map((t, idx) => `${idx + 1}. [ ] ${t.title}${t.due_date ? ` (${formatTaskDueDateDisplay(t.due_date)})` : ""}`)
+            .join("\n")
+        : "No tasks in this list.";
+      const msg = `📋 ${headerTitle} (${activeTasks.length} tasks)\n\n${itemsText}\n\nShared via TickTrack`;
+      await Share.share({
+        message: msg,
+        title: `${headerTitle} - Tasks`,
+      });
+    } catch {}
+  };
 
   const firedReminders = useMemo(() => reminders.filter((item) => item.fired).slice(0, 3), [reminders]);
   const listCounts = useMemo(() => {
@@ -170,12 +421,259 @@ export default function TasksScreen() {
             <Ionicons name="trash-outline" size={20} color={colors.error} />
           </Pressable>
         ) : null}
+        <Pressable
+          testID="manual-refresh-btn"
+          onPress={handleRefresh}
+          disabled={refreshing}
+          style={styles.iconButton}
+          hitSlop={6}
+        >
+          <Ionicons
+            name={refreshing ? "sync" : "refresh-outline"}
+            size={21}
+            color={refreshing ? colors.brandPrimary : colors.onSurface}
+          />
+        </Pressable>
+        <Pressable
+          testID="open-notifications-btn"
+          onPress={() => setNotificationsModal(true)}
+          style={[styles.iconButton, { position: "relative" }]}
+          hitSlop={6}
+        >
+          <Ionicons name="notifications-outline" size={22} color={colors.onSurface} />
+          {unreadNotificationCount > 0 ? (
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationBadgeText}>
+                {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
         <Pressable testID="open-menu" onPress={() => setMenu(true)} style={styles.iconButton}>
           <Ionicons name="ellipsis-vertical" size={22} color={colors.onSurface} />
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} testID="tasks-scroll">
+      {/* Scope Selector inside All Dates: All | Assigned to me | Other */}
+      {selection.kind === "smart" && selection.key === "all" ? (
+        <View style={styles.allDatesScopeContainer}>
+          <View style={styles.allDatesSegmentedControl}>
+            <Pressable
+              testID="scope-all"
+              onPress={() => {
+                setAllDatesScope("all");
+                setSelectedOtherAssignee(null);
+              }}
+              style={[
+                styles.scopeSegment,
+                allDatesScope === "all" && styles.scopeSegmentActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.scopeSegmentText,
+                  allDatesScope === "all" && styles.scopeSegmentTextActive,
+                ]}
+              >
+                All
+              </Text>
+              <View
+                style={[
+                  styles.scopeBadge,
+                  allDatesScope === "all" && styles.scopeBadgeActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.scopeBadgeText,
+                    allDatesScope === "all" && styles.scopeBadgeTextActive,
+                  ]}
+                >
+                  {smartCounts.all}
+                </Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              testID="scope-mine"
+              onPress={() => {
+                setAllDatesScope("mine");
+                setSelectedOtherAssignee(null);
+              }}
+              style={[
+                styles.scopeSegment,
+                allDatesScope === "mine" && styles.scopeSegmentActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.scopeSegmentText,
+                  allDatesScope === "mine" && styles.scopeSegmentTextActive,
+                ]}
+                numberOfLines={1}
+              >
+                Assigned to me
+              </Text>
+              <View
+                style={[
+                  styles.scopeBadge,
+                  allDatesScope === "mine" && styles.scopeBadgeActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.scopeBadgeText,
+                    allDatesScope === "mine" && styles.scopeBadgeTextActive,
+                  ]}
+                >
+                  {assignedToMeCount}
+                </Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              testID="scope-other"
+              onPress={() => setAllDatesScope("other")}
+              style={[
+                styles.scopeSegment,
+                allDatesScope === "other" && styles.scopeSegmentActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.scopeSegmentText,
+                  allDatesScope === "other" && styles.scopeSegmentTextActive,
+                ]}
+              >
+                Other
+              </Text>
+              <View
+                style={[
+                  styles.scopeBadge,
+                  allDatesScope === "other" && styles.scopeBadgeActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.scopeBadgeText,
+                    allDatesScope === "other" && styles.scopeBadgeTextActive,
+                  ]}
+                >
+                  {otherCount}
+                </Text>
+              </View>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Top Filter Bar: Select by employee name or All */}
+      {selection.kind === "smart" && selection.key === "all" && allDatesScope === "other" && otherAssignees.length > 0 ? (
+        <View style={styles.assigneeFilterBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.assigneeFilterScroll}
+          >
+            {/* Search Button to quickly find employee if list is long */}
+            <Pressable
+              testID="filter-other-search-btn"
+              onPress={() => setEmployeeSearchModal(true)}
+              style={styles.assigneeSearchBtn}
+            >
+              <Ionicons name="search" size={13} color={colors.brandPrimary} />
+              <Text style={styles.assigneeSearchBtnText}>Search</Text>
+            </Pressable>
+
+            {/* All option */}
+            <Pressable
+              testID="filter-other-all"
+              onPress={() => setSelectedOtherAssignee(null)}
+              style={[
+                styles.assigneeChip,
+                !selectedOtherAssignee && styles.assigneeChipActive,
+              ]}
+            >
+              <Ionicons
+                name="people"
+                size={14}
+                color={!selectedOtherAssignee ? colors.brandPrimary : colors.muted}
+              />
+              <Text
+                style={[
+                  styles.assigneeChipText,
+                  !selectedOtherAssignee && styles.assigneeChipTextActive,
+                ]}
+              >
+                All
+              </Text>
+              <Text
+                style={[
+                  styles.assigneeChipCount,
+                  !selectedOtherAssignee && styles.assigneeChipCountActive,
+                ]}
+              >
+                {otherCount}
+              </Text>
+            </Pressable>
+
+            {/* Individual employees with active tasks */}
+            {otherAssignees.map((assignee) => {
+              const isSelected = selectedOtherAssignee === assignee.id;
+              return (
+                <Pressable
+                  key={assignee.id}
+                  testID={`filter-other-${assignee.id}`}
+                  onPress={() => setSelectedOtherAssignee(isSelected ? null : assignee.id)}
+                  style={[
+                    styles.assigneeChip,
+                    isSelected && styles.assigneeChipActive,
+                  ]}
+                >
+                  <Ionicons
+                    name="person"
+                    size={13}
+                    color={isSelected ? colors.brandPrimary : colors.muted}
+                  />
+                  <Text
+                    style={[
+                      styles.assigneeChipText,
+                      isSelected && styles.assigneeChipTextActive,
+                    ]}
+                  >
+                    {assignee.name}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.assigneeChipCount,
+                      isSelected && styles.assigneeChipCountActive,
+                    ]}
+                  >
+                    {assignee.count}
+                  </Text>
+                  {isSelected ? (
+                    <Ionicons name="close-circle" size={14} color={colors.brandPrimary} style={{ marginLeft: 2 }} />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ) : null}
+
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        testID="tasks-scroll"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.brandPrimary}
+            colors={[colors.brandPrimary]}
+          />
+        }
+      >
         {firedReminders.length ? (
           <View style={styles.remindersBlock} testID="reminders-block">
             <View style={styles.remindersHeader}>
@@ -202,59 +700,70 @@ export default function TasksScreen() {
           <EmptyState title={activeListDoc ? "No tasks" : activeSmart?.empty.title ?? "No tasks"} copy={activeListDoc ? "Captures all your tasks and ideas" : activeSmart?.empty.copy ?? ""} icon={activeListDoc?.emoji ?? null} styles={styles} colors={colors} />
         ) : (
           <>
-            {activeTasks.length > 0 ? (
-              <View style={styles.cardGroup}>
-                {activeTasks.map((task, index) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    onPress={(t) => setDetailTask(t)}
-                    onToggle={() => handleToggleTask(task)}
-                    onDelete={() => deleteTask(task.id)}
-                    listsById={lists}
-                    isLast={index === activeTasks.length - 1}
-                    styles={styles}
-                    colors={colors}
-                  />
-                ))}
-              </View>
-            ) : null}
-
-            {/* Completed list card under active list */}
-            {completedTasks.length > 0 && !isCompletedSmartKey ? (
-              <View style={styles.completedCardGroup}>
+            {/* Overdue Box on Top */}
+            {overdueTasks.length > 0 ? (
+              <View style={styles.overdueCardGroup}>
                 <Pressable
-                  testID="toggle-completed-section"
-                  onPress={() => setShowCompletedSection((val) => !val)}
-                  style={styles.completedCardHeader}
+                  testID="toggle-overdue-section"
+                  onPress={() => setShowOverdueSection((val) => !val)}
+                  style={styles.overdueCardHeader}
                 >
-                  <Text style={styles.completedCardTitle}>Completed</Text>
-                  <View style={styles.completedCardRight}>
-                    <Text style={styles.completedCardCount}>{completedTasks.length}</Text>
-                    <Ionicons
-                      name={showCompletedSection ? "chevron-up" : "chevron-down"}
-                      size={16}
-                      color={colors.muted}
-                    />
+                  <View style={styles.overdueHeaderLeft}>
+                    <Ionicons name="alert-circle" size={17} color={colors.error} />
+                    <Text style={styles.overdueCardTitle}>Overdue</Text>
+                    <View style={styles.overdueCountBadge}>
+                      <Text style={styles.overdueCountBadgeText}>{overdueTasks.length}</Text>
+                    </View>
                   </View>
+                  <Ionicons
+                    name={showOverdueSection ? "chevron-up" : "chevron-down"}
+                    size={16}
+                    color={colors.muted}
+                  />
                 </Pressable>
-                {showCompletedSection ? (
-                  <View style={styles.completedListBody}>
-                    {completedTasks.map((task, index) => (
+
+                {showOverdueSection ? (
+                  <View style={styles.overdueListBody}>
+                    {overdueTasks.map((task, index) => (
                       <TaskRow
                         key={task.id}
                         task={task}
                         onPress={(t) => setDetailTask(t)}
                         onToggle={() => handleToggleTask(task)}
                         onDelete={() => deleteTask(task.id)}
+                        onPostpone={(t) => setPostponeModalTask(t)}
                         listsById={lists}
-                        isLast={index === completedTasks.length - 1}
+                        isLast={index === overdueTasks.length - 1}
+                        showDetails={showDetails}
+                        showTime={showTime}
                         styles={styles}
                         colors={colors}
                       />
                     ))}
                   </View>
                 ) : null}
+              </View>
+            ) : null}
+
+            {/* Regular Tasks Group */}
+            {regularTasks.length > 0 ? (
+              <View style={styles.cardGroup}>
+                {regularTasks.map((task, index) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    onPress={(t) => setDetailTask(t)}
+                    onToggle={() => handleToggleTask(task)}
+                    onDelete={() => deleteTask(task.id)}
+                    onPostpone={(t) => setPostponeModalTask(t)}
+                    listsById={lists}
+                    isLast={index === regularTasks.length - 1}
+                    showDetails={showDetails}
+                    showTime={showTime}
+                    styles={styles}
+                    colors={colors}
+                  />
+                ))}
               </View>
             ) : null}
           </>
@@ -281,6 +790,13 @@ export default function TasksScreen() {
         onClose={() => setComposer(null)}
         defaultDue={selection.kind === "smart" && (selection.key === "today" || selection.key === "tomorrow") ? format(selection.key === "today" ? new Date() : addDays(new Date(), 1), "yyyy-MM-dd") : undefined}
         defaultListId={selection.kind === "list" ? selection.id : inboxList?.id ?? null}
+        defaultAssigneeIds={
+          allDatesScope === "mine" && user?.id
+            ? [user.id]
+            : selectedOtherAssignee
+            ? [selectedOtherAssignee]
+            : undefined
+        }
       />
 
       <DrawerSheet
@@ -289,9 +805,25 @@ export default function TasksScreen() {
         lists={lists}
         listCounts={listCounts}
         smartCounts={smartCounts}
+        allDatesScope={allDatesScope}
+        assignedToMeCount={assignedToMeCount}
+        otherCount={otherCount}
         userName={displayName}
         userEmail={user?.email ?? ""}
-        onSelectSmart={(key) => { setSelection({ kind: "smart", key }); setDrawer(false); }}
+        onSelectSmart={(key) => {
+          setSelection({ kind: "smart", key });
+          if (key === "all") {
+            setAllDatesScope("all");
+            setSelectedOtherAssignee(null);
+          }
+          setDrawer(false);
+        }}
+        onSelectAllDatesScope={(scope) => {
+          setSelection({ kind: "smart", key: "all" });
+          setAllDatesScope(scope);
+          setSelectedOtherAssignee(null);
+          setDrawer(false);
+        }}
         onSelectList={(id) => { setSelection({ kind: "list", id }); setDrawer(false); }}
         onDeleteList={(id, name) => handleDeleteList(id, name)}
         onNavigateFocus={() => { setDrawer(false); router.push("/(tabs)/focus"); }}
@@ -306,6 +838,65 @@ export default function TasksScreen() {
         onSignOut={doSignOut}
         onClose={() => setMenu(false)}
         onOpenVoice={() => { setMenu(false); setComposer("voice"); }}
+        onOpenFilter={() => { setMenu(false); setFilterModal(true); }}
+        onOpenViewOptions={() => { setMenu(false); setViewOptionsModal(true); }}
+        onOpenArrange={() => { setMenu(false); setArrangeModal(true); }}
+        onShareList={handleShareList}
+        styles={styles}
+        colors={colors}
+      />
+
+      <EmployeeSearchModal
+        visible={employeeSearchModal}
+        onClose={() => setEmployeeSearchModal(false)}
+        employees={otherAssignees}
+        selectedId={selectedOtherAssignee}
+        onSelect={(id) => setSelectedOtherAssignee(id)}
+        totalCount={otherCount}
+        styles={styles}
+        colors={colors}
+      />
+
+      <TaskFilterModal
+        visible={filterModal}
+        filterPriority={filterPriority}
+        setFilterPriority={setFilterPriority}
+        filterAssignee={filterAssignee}
+        setFilterAssignee={setFilterAssignee}
+        assignees={
+          otherAssignees.length > 0 || (user && assignedToMeCount > 0)
+            ? [
+                ...(user && assignedToMeCount > 0 ? [{ id: user.id, name: `${displayName} (Me)`, count: assignedToMeCount }] : []),
+                ...otherAssignees.map((a) => ({ id: a.id, name: a.name, count: a.count })),
+              ]
+            : assignableUsers.map((u) => ({
+                id: u.id,
+                name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email,
+              }))
+        }
+        onClose={() => setFilterModal(false)}
+        styles={styles}
+        colors={colors}
+      />
+
+      <TaskViewOptionsModal
+        visible={viewOptionsModal}
+        showCompletedSection={showCompletedSection}
+        setShowCompletedSection={setShowCompletedSection}
+        showDetails={showDetails}
+        setShowDetails={setShowDetails}
+        showTime={showTime}
+        setShowTime={setShowTime}
+        onClose={() => setViewOptionsModal(false)}
+        styles={styles}
+        colors={colors}
+      />
+
+      <TaskArrangeModal
+        visible={arrangeModal}
+        arrangeBy={arrangeBy}
+        setArrangeBy={setArrangeBy}
+        onClose={() => setArrangeModal(false)}
         styles={styles}
         colors={colors}
       />
@@ -313,7 +904,7 @@ export default function TasksScreen() {
       <ConfirmDeleteModal
         visible={Boolean(deleteTarget)}
         title={deleteTarget ? `Delete "${deleteTarget.name}"?` : "Delete list?"}
-        message="Are you sure you want to delete this list? Tasks in this list will remain available in All Tasks."
+        message="Are you sure you want to delete this list? Tasks in this list will remain available in All Dates."
         loading={deletingList}
         onClose={() => setDeleteTarget(null)}
         onConfirm={async () => {
@@ -337,15 +928,40 @@ export default function TasksScreen() {
         onClose={() => setDetailTask(null)}
         onToggle={handleToggleTask}
         onDelete={deleteTask}
+        onPostpone={(t) => setPostponeModalTask(t)}
+        onEdit={(t) => setEditModalTask(t)}
         lists={lists}
+      />
+      <TaskEditModal
+        task={editModalTask}
+        visible={Boolean(editModalTask)}
+        onClose={() => setEditModalTask(null)}
+        onSave={editTask}
+      />
+      <PostponeActivityModal
+        task={postponeModalTask}
+        visible={Boolean(postponeModalTask)}
+        onClose={() => setPostponeModalTask(null)}
       />
       <ConfirmSignOutModal
         visible={signOutModal}
         onClose={() => setSignOutModal(false)}
         onConfirm={handleConfirmSignOut}
       />
+      <NotificationsModal
+        visible={notificationsModal}
+        onClose={() => setNotificationsModal(false)}
+        onSelectTask={(task) => setDetailTask(task)}
+      />
     </View>
   );
+}
+
+export function isTaskOverdue(task: Task): boolean {
+  if (task.completed || !task.due_date) return false;
+  const parsed = parseTaskDate(task.due_date);
+  if (!parsed) return false;
+  return parsed.getTime() < startOfDay(new Date()).getTime();
 }
 
 function filterActiveTasks(tasks: Task[], selection: Selection, userId?: string): Task[] {
@@ -371,14 +987,14 @@ function filterActiveTasks(tasks: Task[], selection: Selection, userId?: string)
             const createdTime = task.created_at || task.createdAt;
             if (createdTime) {
               const createdDate = startOfDay(new Date(createdTime));
-              return createdDate.getTime() === today.getTime();
+              return createdDate.getTime() <= today.getTime();
             }
             return false;
           }
           const parsed = parseTaskDate(task.due_date);
           if (!parsed) return false;
           const taskDate = startOfDay(parsed);
-          return taskDate.getTime() === today.getTime();
+          return taskDate.getTime() <= today.getTime();
         });
         break;
       case "tomorrow":
@@ -408,7 +1024,13 @@ function filterActiveTasks(tasks: Task[], selection: Selection, userId?: string)
         result = [];
     }
   }
-  return result.sort((a, b) => getUpcomingTaskTimestamp(a) - getUpcomingTaskTimestamp(b));
+  return result.sort((a, b) => {
+    const aOver = isTaskOverdue(a);
+    const bOver = isTaskOverdue(b);
+    if (aOver && !bOver) return -1;
+    if (!aOver && bOver) return 1;
+    return getUpcomingTaskTimestamp(a) - getUpcomingTaskTimestamp(b);
+  });
 }
 
 function filterCompletedTasks(tasks: Task[], selection: Selection): Task[] {
@@ -500,26 +1122,19 @@ function ReminderCard({ reminder, onDismiss, styles, colors }: { reminder: Remin
   );
 }
 
-function TaskRow({ task, onPress, onToggle, onDelete, listsById, isLast, styles, colors }: { task: Task; onPress: (task: Task) => void; onToggle: () => void; onDelete: () => void; listsById: TaskList[]; isLast?: boolean; styles: ReturnType<typeof useStyles>; colors: ReturnType<typeof useTheme>["colors"] }) {
+function TaskRow({ task, onPress, onToggle, onDelete, onPostpone, listsById, isLast, showDetails = true, showTime = true, styles, colors }: { task: Task; onPress: (task: Task) => void; onToggle: () => void; onDelete: () => void; onPostpone?: (task: Task) => void; listsById: TaskList[]; isLast?: boolean; showDetails?: boolean; showTime?: boolean; styles: ReturnType<typeof useStyles>; colors: ReturnType<typeof useTheme>["colors"] }) {
   const taskList = listsById.find((item) => item.id === task.list_id || item.id === task.projectId);
   const assigneeName = task.assignee
     ? `${task.assignee.firstName ?? ""} ${task.assignee.lastName ?? ""}`.trim()
     : task.assigneeName;
   const dueDateLabel = formatTaskDueDateDisplay(task.due_date);
+  const isOverdue = isTaskOverdue(task);
 
-  // Date pill colors: red bg if overdue, orange bg if today, neutral otherwise
-  const datePillStyle = (() => {
+  // Due date text color: red if overdue, blue (#3B82F6 / brandPrimary) if scheduled
+  const dateColor = (() => {
     if (task.completed || !task.due_date) return null;
-    const parsed = parseTaskDate(task.due_date);
-    if (!parsed) return null;
-    const now = new Date();
-    const todayStart = startOfDay(now);
-    const tomorrowStart = startOfDay(addDays(now, 1));
-    if (parsed.getTime() < todayStart.getTime())
-      return { bg: "#FEE2E2", text: "#DC2626" };    // overdue → red
-    if (parsed.getTime() < tomorrowStart.getTime())
-      return { bg: "#FFEDD5", text: "#EA580C" };     // today → orange
-    return null;                                      // future → neutral gray
+    if (isOverdue) return "#EF4444";
+    return colors.brandPrimary || "#3B82F6";
   })();
 
   const checkScale = useRef(new Animated.Value(1)).current;
@@ -646,47 +1261,59 @@ function TaskRow({ task, onPress, onToggle, onDelete, listsById, isLast, styles,
           {/* Checkbox with bounce */}
           <Pressable testID={`toggle-${task.id}`} onPress={handleCheck} style={styles.checkboxTouch}>
             <Animated.View style={[styles.checkbox, task.completed && styles.checkboxDone, { transform: [{ scale: checkScale }] }]}>
-              {task.completed ? <Ionicons name="checkmark" size={14} color={colors.onBrandPrimary} /> : null}
+              {task.completed ? <Ionicons name="checkmark" size={11} color="#FFFFFF" /> : null}
             </Animated.View>
           </Pressable>
 
-          {/* Content */}
+          {/* Main Content (Title & optional Assignee) */}
           <View style={styles.taskContent}>
-            {/* Title */}
             <Text style={[styles.taskTitle, task.completed && styles.taskDone]} numberOfLines={2}>
               {task.title}
             </Text>
-
-            {/* Meta line: date pill + assignee + list */}
-            {(dueDateLabel || assigneeName || (taskList && !taskList.system)) ? (
+            {showDetails && (assigneeName || (taskList && !taskList.system)) ? (
               <View style={styles.metaRow}>
-                {/* Colored date pill */}
-                {dueDateLabel ? (
-                  <View style={[styles.datePill, datePillStyle ? { backgroundColor: datePillStyle.bg } : null]}>
-                    <Text style={[styles.datePillText, datePillStyle ? { color: datePillStyle.text } : null]}>
-                      {dueDateLabel}
-                    </Text>
-                  </View>
-                ) : null}
-
-                {/* Assignee */}
                 {assigneeName ? (
                   <View style={styles.metaItem}>
-                    <Ionicons name="person-outline" size={13} color={colors.muted} />
+                    <Ionicons name="person-outline" size={11} color={colors.muted} />
                     <Text style={styles.metaText} numberOfLines={1}>{assigneeName}</Text>
                   </View>
                 ) : null}
 
-                {/* List */}
+                {assigneeName && taskList && !taskList.system ? (
+                  <Text style={styles.metaDot}>·</Text>
+                ) : null}
+
                 {taskList && !taskList.system ? (
                   <View style={styles.metaItem}>
-                    <Ionicons name="folder" size={13} color="#EAB308" />
-                    <Text style={styles.metaText}>{taskList.name}</Text>
+                    <Ionicons name="folder-outline" size={11} color="#EAB308" />
+                    <Text style={styles.metaText} numberOfLines={1}>{taskList.name}</Text>
                   </View>
                 ) : null}
               </View>
             ) : null}
           </View>
+
+          {/* Right: Date & Time + Alarm / Postpone Icon */}
+          {showTime && !task.completed && dueDateLabel ? (
+            <View style={styles.taskRightMeta}>
+              <Text style={[styles.taskDateText, { color: dateColor || colors.brandPrimary }]} numberOfLines={1}>
+                {dueDateLabel}
+              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Ionicons name="alarm-outline" size={13} color="#9CA3AF" style={styles.alarmIcon} />
+                {onPostpone ? (
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() => onPostpone(task)}
+                    style={styles.postponeQuickBtn}
+                    testID={`postpone-task-${task.id}`}
+                  >
+                    <Ionicons name="time-outline" size={14} color={colors.brandPrimary} />
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
         </Pressable>
       </Animated.View>
     </View>
@@ -907,9 +1534,13 @@ function DrawerSheet(props: {
   lists: TaskList[];
   listCounts: Record<string, number>;
   smartCounts: Record<SmartKey, number>;
+  allDatesScope: "all" | "mine" | "other";
+  assignedToMeCount: number;
+  otherCount: number;
   userName: string;
   userEmail: string;
   onSelectSmart: (key: SmartKey) => void;
+  onSelectAllDatesScope: (scope: "all" | "mine" | "other") => void;
   onSelectList: (id: string) => void;
   onDeleteList?: (id: string, name: string) => void;
   onNavigateFocus: () => void;
@@ -921,7 +1552,28 @@ function DrawerSheet(props: {
   const insets = useSafeAreaInsets();
   const { user, reorderLists } = useApp();
   const [isDragging, setIsDragging] = useState(false);
-  const { visible, selection, lists, listCounts, smartCounts, userName, userEmail, onSelectSmart, onSelectList, onDeleteList, onNavigateFocus, onNavigateHabits, onClose, styles, colors } = props;
+
+  const {
+    visible,
+    selection,
+    lists,
+    listCounts,
+    smartCounts,
+    allDatesScope,
+    assignedToMeCount,
+    otherCount,
+    userName,
+    userEmail,
+    onSelectSmart,
+    onSelectAllDatesScope,
+    onSelectList,
+    onDeleteList,
+    onNavigateFocus,
+    onNavigateHabits,
+    onClose,
+    styles,
+    colors,
+  } = props;
   const activeListId = selection.kind === "list" ? selection.id : null;
   const activeSmart = selection.kind === "smart" ? selection.key : null;
 
@@ -956,20 +1608,59 @@ function DrawerSheet(props: {
           </View>
           <ScrollView showsVerticalScrollIndicator={false} scrollEnabled={!isDragging}>
             <Text style={[styles.drawerSection, { marginTop: 8 }]}>Smart lists</Text>
-            {SMART_LISTS.map((list) => (
-              <Pressable
-                key={list.key}
-                testID={`smart-${list.key}`}
-                onPress={() => onSelectSmart(list.key)}
-                style={({ pressed }) => [styles.drawerRow, activeSmart === list.key && styles.drawerRowActive, pressed && styles.rowPressed]}
-              >
-                <View style={[styles.drawerIcon, activeSmart === list.key && styles.drawerIconActive]}>
-                  <Ionicons name={list.icon as never} size={18} color={activeSmart === list.key ? colors.onBrandPrimary : colors.brandPrimary} />
-                </View>
-                <Text style={[styles.drawerLabel, { flex: 1 }, activeSmart === list.key && styles.drawerLabelActive]}>{list.label}</Text>
-                <Text style={[styles.drawerCount, activeSmart === list.key && { color: colors.brandPrimary, fontWeight: "600" }]}>{smartCounts[list.key]}</Text>
-              </Pressable>
-            ))}
+            {SMART_LISTS.map((list) => {
+              const isSmartActive = activeSmart === list.key;
+
+              return (
+                <Pressable
+                  key={list.key}
+                  testID={`smart-${list.key}`}
+                  onPress={() => onSelectSmart(list.key)}
+                  style={({ pressed }) => [
+                    styles.drawerRow,
+                    isSmartActive && styles.drawerRowActive,
+                    pressed && styles.rowPressed,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.drawerIcon,
+                      isSmartActive && styles.drawerIconActive,
+                    ]}
+                  >
+                    <Ionicons
+                      name={list.icon as never}
+                      size={18}
+                      color={
+                        isSmartActive
+                          ? colors.onBrandPrimary
+                          : colors.brandPrimary
+                      }
+                    />
+                  </View>
+                  <Text
+                    style={[
+                      styles.drawerLabel,
+                      { flex: 1 },
+                      isSmartActive && styles.drawerLabelActive,
+                    ]}
+                  >
+                    {list.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.drawerCount,
+                      isSmartActive && {
+                        color: colors.brandPrimary,
+                        fontWeight: "600",
+                      },
+                    ]}
+                  >
+                    {smartCounts[list.key]}
+                  </Text>
+                </Pressable>
+              );
+            })}
 
             <View style={styles.drawerSectionHeader}>
               <Text style={styles.drawerSection}>Lists</Text>
@@ -1014,18 +1705,29 @@ function DrawerSheet(props: {
   );
 }
 
-function MenuSheet(props: { visible: boolean; onSignOut: () => void; onClose: () => void; onOpenVoice: () => void; styles: ReturnType<typeof useStyles>; colors: ReturnType<typeof useTheme>["colors"] }) {
+function MenuSheet(props: {
+  visible: boolean;
+  onSignOut: () => void;
+  onClose: () => void;
+  onOpenVoice: () => void;
+  onOpenFilter: () => void;
+  onOpenViewOptions: () => void;
+  onOpenArrange: () => void;
+  onShareList: () => void;
+  styles: ReturnType<typeof useStyles>;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
   const insets = useSafeAreaInsets();
-  const { visible, onSignOut, onClose, onOpenVoice, styles, colors } = props;
+  const { visible, onSignOut, onClose, onOpenVoice, onOpenFilter, onOpenViewOptions, onOpenArrange, onShareList, styles, colors } = props;
   return (
     <Modal visible={visible} animationType="fade" transparent statusBarTranslucent onRequestClose={onClose}>
       <Pressable onPress={onClose} style={styles.menuBackdrop}>
         <Pressable onPress={() => { /* trap */ }} style={[styles.menuCard, { top: insets.top + 44 }]} testID="menu-card">
           <MenuItem icon="mic-outline" label="Voice capture" onPress={onOpenVoice} styles={styles} colors={colors} testID="menu-voice" />
-          <MenuItem icon="funnel-outline" label="Filter" onPress={onClose} styles={styles} colors={colors} testID="menu-filter" />
-          <MenuItem icon="options-outline" label="View options" onPress={onClose} styles={styles} colors={colors} testID="menu-view" />
-          <MenuItem icon="swap-vertical-outline" label="Arrange tasks" onPress={onClose} styles={styles} colors={colors} testID="menu-arrange" />
-          <MenuItem icon="share-social-outline" label="Share list" onPress={onClose} styles={styles} colors={colors} testID="menu-share" />
+          <MenuItem icon="funnel-outline" label="Filter" onPress={onOpenFilter} styles={styles} colors={colors} testID="menu-filter" />
+          <MenuItem icon="options-outline" label="View options" onPress={onOpenViewOptions} styles={styles} colors={colors} testID="menu-view" />
+          <MenuItem icon="swap-vertical-outline" label="Arrange tasks" onPress={onOpenArrange} styles={styles} colors={colors} testID="menu-arrange" />
+          <MenuItem icon="share-social-outline" label="Share list" onPress={onShareList} styles={styles} colors={colors} testID="menu-share" />
           <View style={styles.menuDivider} />
           <MenuItem icon="log-out-outline" label="Sign out" onPress={onSignOut} tone="danger" styles={styles} colors={colors} testID="menu-sign-out" />
         </Pressable>
@@ -1044,20 +1746,492 @@ function MenuItem({ icon, label, onPress, tone = "default", styles, colors, test
   );
 }
 
+function EmployeeSearchModal(props: {
+  visible: boolean;
+  onClose: () => void;
+  employees: { id: string; name: string; count: number }[];
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  totalCount: number;
+  styles: ReturnType<typeof useStyles>;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const { visible, onClose, employees, selectedId, onSelect, totalCount, styles, colors } = props;
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    if (visible) {
+      setQuery("");
+    }
+  }, [visible]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return employees;
+    return employees.filter((e) => e.name.toLowerCase().includes(q));
+  }, [employees, query]);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={styles.modalBackdrop}>
+        <Pressable onPress={() => {}} style={[styles.modalCard, { maxHeight: 520 }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Filter by Employee</Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+          </View>
+
+          {/* Search Box */}
+          <View style={styles.modalSearchBox}>
+            <Ionicons name="search" size={16} color={colors.muted} />
+            <TextInput
+              autoFocus
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search employee name..."
+              placeholderTextColor={colors.muted}
+              style={styles.modalSearchInput}
+              returnKeyType="search"
+            />
+            {query ? (
+              <Pressable onPress={() => setQuery("")} hitSlop={6}>
+                <Ionicons name="close-circle" size={16} color={colors.muted} />
+              </Pressable>
+            ) : null}
+          </View>
+
+          <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
+            {/* All Others option */}
+            {!query ? (
+              <Pressable
+                onPress={() => {
+                  onSelect(null);
+                  onClose();
+                }}
+                style={styles.modalOptionRow}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+                  <Ionicons name="people-outline" size={16} color={!selectedId ? colors.brandPrimary : colors.muted} />
+                  <Text style={[styles.modalOptionText, !selectedId && styles.modalOptionTextActive, { flex: 1 }]}>
+                    All Others
+                  </Text>
+                  <Text style={{ fontSize: 12, color: colors.muted, fontWeight: "600", marginRight: 6 }}>
+                    {totalCount} tasks
+                  </Text>
+                </View>
+                {!selectedId ? (
+                  <Ionicons name="checkmark" size={18} color={colors.brandPrimary} />
+                ) : null}
+              </Pressable>
+            ) : null}
+
+            {/* Filtered employee list */}
+            {filtered.map((emp) => {
+              const isSelected = selectedId === emp.id;
+              return (
+                <Pressable
+                  key={emp.id}
+                  onPress={() => {
+                    onSelect(emp.id);
+                    onClose();
+                  }}
+                  style={styles.modalOptionRow}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+                    <Ionicons name="person-outline" size={15} color={isSelected ? colors.brandPrimary : colors.muted} />
+                    <Text style={[styles.modalOptionText, isSelected && styles.modalOptionTextActive, { flex: 1 }]} numberOfLines={1}>
+                      {emp.name}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: colors.muted, fontWeight: "600", marginRight: 6 }}>
+                      {emp.count} {emp.count === 1 ? "task" : "tasks"}
+                    </Text>
+                  </View>
+                  {isSelected ? (
+                    <Ionicons name="checkmark" size={18} color={colors.brandPrimary} />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+
+            {filtered.length === 0 ? (
+              <View style={{ paddingVertical: 24, alignItems: "center" }}>
+                <Text style={{ color: colors.muted, fontSize: 14 }}>No employees found</Text>
+              </View>
+            ) : null}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function TaskFilterModal(props: {
+  visible: boolean;
+  filterPriority: string;
+  setFilterPriority: (p: string) => void;
+  filterAssignee: string;
+  setFilterAssignee: (a: string) => void;
+  assignees: { id: string; name: string; count?: number }[];
+  onClose: () => void;
+  styles: ReturnType<typeof useStyles>;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const { visible, filterPriority, setFilterPriority, filterAssignee, setFilterAssignee, assignees, onClose, styles, colors } = props;
+  const [tempPriority, setTempPriority] = useState(filterPriority);
+  const [tempAssignee, setTempAssignee] = useState(filterAssignee);
+
+  useEffect(() => {
+    if (visible) {
+      setTempPriority(filterPriority);
+      setTempAssignee(filterAssignee);
+    }
+  }, [visible, filterPriority, filterAssignee]);
+
+  const priorities = [
+    { key: "all", label: "All Priorities" },
+    { key: "critical", label: "🔴 Critical" },
+    { key: "high", label: "🔴 High" },
+    { key: "medium", label: "🟡 Medium" },
+    { key: "low", label: "🔵 Low" },
+    { key: "none", label: "⚪ No Priority" },
+  ];
+
+  const handleApply = () => {
+    setFilterPriority(tempPriority);
+    setFilterAssignee(tempAssignee);
+    onClose();
+  };
+
+  const handleReset = () => {
+    setTempPriority("all");
+    setTempAssignee("all");
+    setFilterPriority("all");
+    setFilterAssignee("all");
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={styles.modalBackdrop}>
+        <Pressable onPress={() => {}} style={styles.modalCard}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Filter Tasks</Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+          </View>
+
+          <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+            <Text style={styles.modalSectionTitle}>Priority</Text>
+            {priorities.map((item) => (
+              <Pressable
+                key={item.key}
+                onPress={() => setTempPriority(item.key)}
+                style={styles.modalOptionRow}
+              >
+                <Text style={[styles.modalOptionText, tempPriority === item.key && styles.modalOptionTextActive]}>
+                  {item.label}
+                </Text>
+                {tempPriority === item.key ? (
+                  <Ionicons name="checkmark" size={18} color={colors.brandPrimary} />
+                ) : null}
+              </Pressable>
+            ))}
+
+            {assignees && assignees.length > 0 ? (
+              <>
+                <Text style={styles.modalSectionTitle}>Assignee</Text>
+                <Pressable
+                  onPress={() => setTempAssignee("all")}
+                  style={styles.modalOptionRow}
+                >
+                  <Text style={[styles.modalOptionText, tempAssignee === "all" && styles.modalOptionTextActive]}>
+                    All Assignees
+                  </Text>
+                  {tempAssignee === "all" ? (
+                    <Ionicons name="checkmark" size={18} color={colors.brandPrimary} />
+                  ) : null}
+                </Pressable>
+                {assignees.map((u) => {
+                  return (
+                    <Pressable
+                      key={u.id}
+                      onPress={() => setTempAssignee(u.name)}
+                      style={styles.modalOptionRow}
+                    >
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                        <Ionicons name="person-outline" size={14} color={colors.muted} />
+                        <Text style={[styles.modalOptionText, tempAssignee === u.name && styles.modalOptionTextActive, { flex: 1 }]} numberOfLines={1}>
+                          {u.name}
+                        </Text>
+                        {u.count !== undefined ? (
+                          <Text style={{ fontSize: 12, color: colors.muted, fontWeight: "500", marginRight: 6 }}>
+                            {u.count}
+                          </Text>
+                        ) : null}
+                      </View>
+                      {tempAssignee === u.name ? (
+                        <Ionicons name="checkmark" size={18} color={colors.brandPrimary} />
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </>
+            ) : null}
+          </ScrollView>
+
+          <View style={styles.modalActions}>
+            <Pressable onPress={handleReset} style={styles.modalButton}>
+              <Text style={styles.modalButtonText}>Reset</Text>
+            </Pressable>
+            <Pressable onPress={handleApply} style={[styles.modalButton, styles.modalButtonPrimary]}>
+              <Text style={styles.modalButtonPrimaryText}>Apply</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function TaskViewOptionsModal(props: {
+  visible: boolean;
+  showCompletedSection: boolean;
+  setShowCompletedSection: (v: boolean) => void;
+  showDetails: boolean;
+  setShowDetails: (v: boolean) => void;
+  showTime: boolean;
+  setShowTime: (v: boolean) => void;
+  onClose: () => void;
+  styles: ReturnType<typeof useStyles>;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const { visible, showCompletedSection, setShowCompletedSection, showDetails, setShowDetails, showTime, setShowTime, onClose, styles, colors } = props;
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={styles.modalBackdrop}>
+        <Pressable onPress={() => {}} style={styles.modalCard}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>View Options</Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+          </View>
+
+          <View style={styles.modalOptionRow}>
+            <View style={styles.modalOptionLeft}>
+              <Ionicons name="checkmark-done-outline" size={20} color={colors.brandPrimary} />
+              <Text style={styles.modalOptionText}>Show Completed Section</Text>
+            </View>
+            <Switch
+              value={showCompletedSection}
+              onValueChange={setShowCompletedSection}
+              trackColor={{ false: colors.border, true: colors.brandPrimary }}
+            />
+          </View>
+
+          <View style={styles.modalOptionRow}>
+            <View style={styles.modalOptionLeft}>
+              <Ionicons name="person-outline" size={20} color={colors.brandPrimary} />
+              <Text style={styles.modalOptionText}>Show Assignee & List</Text>
+            </View>
+            <Switch
+              value={showDetails}
+              onValueChange={setShowDetails}
+              trackColor={{ false: colors.border, true: colors.brandPrimary }}
+            />
+          </View>
+
+          <View style={[styles.modalOptionRow, { borderBottomWidth: 0 }]}>
+            <View style={styles.modalOptionLeft}>
+              <Ionicons name="time-outline" size={20} color={colors.brandPrimary} />
+              <Text style={styles.modalOptionText}>Show Date & Alarm</Text>
+            </View>
+            <Switch
+              value={showTime}
+              onValueChange={setShowTime}
+              trackColor={{ false: colors.border, true: colors.brandPrimary }}
+            />
+          </View>
+
+          <View style={styles.modalActions}>
+            <Pressable onPress={onClose} style={[styles.modalButton, styles.modalButtonPrimary]}>
+              <Text style={styles.modalButtonPrimaryText}>Done</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function TaskArrangeModal(props: {
+  visible: boolean;
+  arrangeBy: "due_date" | "priority" | "title" | "created";
+  setArrangeBy: (v: "due_date" | "priority" | "title" | "created") => void;
+  onClose: () => void;
+  styles: ReturnType<typeof useStyles>;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const { visible, arrangeBy, setArrangeBy, onClose, styles, colors } = props;
+
+  const options: { key: "due_date" | "priority" | "title" | "created"; label: string; icon: string }[] = [
+    { key: "due_date", label: "By Due Date", icon: "calendar-outline" },
+    { key: "priority", label: "By Priority (High to Low)", icon: "alert-circle-outline" },
+    { key: "title", label: "By Title (A - Z)", icon: "text-outline" },
+    { key: "created", label: "By Creation Time (Newest)", icon: "time-outline" },
+  ];
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={styles.modalBackdrop}>
+        <Pressable onPress={() => {}} style={styles.modalCard}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Arrange Tasks</Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+          </View>
+
+          {options.map((opt, idx) => (
+            <Pressable
+              key={opt.key}
+              onPress={() => {
+                setArrangeBy(opt.key);
+                onClose();
+              }}
+              style={[styles.modalOptionRow, idx === options.length - 1 && { borderBottomWidth: 0 }]}
+            >
+              <View style={styles.modalOptionLeft}>
+                <Ionicons name={opt.icon as never} size={18} color={arrangeBy === opt.key ? colors.brandPrimary : colors.muted} />
+                <Text style={[styles.modalOptionText, arrangeBy === opt.key && styles.modalOptionTextActive]}>
+                  {opt.label}
+                </Text>
+              </View>
+              {arrangeBy === opt.key ? (
+                <Ionicons name="checkmark-circle" size={18} color={colors.brandPrimary} />
+              ) : null}
+            </Pressable>
+          ))}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 const useStyles = makeStyles((colors) => ({
-  screen: { flex: 1, backgroundColor: colors.surface },
-  headerBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 8, gap: 4 },
-  headerTitle: { color: colors.onSurface, fontSize: 22, fontWeight: "700", flex: 1, marginLeft: 4 },
+  screen: { flex: 1, backgroundColor: colors.surfaceSecondary },
+  headerBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 8, gap: 4, backgroundColor: colors.surfaceSecondary },
+  headerTitle: { color: colors.onSurface, fontSize: 18, fontWeight: "600", flex: 1, marginLeft: 4 },
   headerCount: { color: colors.muted, fontSize: 13, fontWeight: "500" },
   iconButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center", borderRadius: 12 },
-  content: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 120 },
+  notificationBadge: {
+    position: "absolute",
+    top: 5,
+    right: 5,
+    backgroundColor: "#EF4444",
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notificationBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  content: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 120 },
 
-  /* Task list — no card wrapper, flat on white bg */
-  cardGroup: { paddingVertical: 0 },
-  completedCardGroup: { paddingTop: 16, paddingBottom: 4, marginBottom: 14, borderTopWidth: 1, borderTopColor: colors.divider },
-  completedCardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 4, marginBottom: 2 },
+  /* Overdue Box — highlighted card container on top */
+  overdueCardGroup: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 6,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    shadowColor: "#000",
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    marginBottom: 14,
+  },
+  overdueCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+    marginBottom: 4,
+  },
+  overdueHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  overdueCardTitle: {
+    color: "#EF4444",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  overdueCountBadge: {
+    backgroundColor: "#FEE2E2",
+    borderRadius: 12,
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+  },
+  overdueCountBadgeText: {
+    color: "#DC2626",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  overdueListBody: {
+    paddingTop: 2,
+  },
+
+  /* Task list — clean white card container */
+  cardGroup: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: "#000",
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    marginBottom: 14,
+  },
+  completedCardGroup: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 6,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: "#000",
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    marginBottom: 16,
+  },
+  completedCardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6, marginBottom: 4 },
   completedCardTitle: { color: colors.muted, fontSize: 14, fontWeight: "600" },
-  completedCardRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  completedCardRight: { flexDirection: "row", alignItems: "center", gap: 4 },
   completedCardCount: { color: colors.muted, fontSize: 13, fontWeight: "500" },
   completedListBody: { paddingTop: 2 },
 
@@ -1081,7 +2255,7 @@ const useStyles = makeStyles((colors) => ({
   emptyTitle: { color: colors.onSurface, fontSize: 18, fontWeight: "700", marginBottom: 8 },
   emptyCopy: { color: colors.muted, fontSize: 14, textAlign: "center", lineHeight: 20, maxWidth: 260 },
 
-  /* ── Task row (flat, inside white card) ── */
+  /* ── Task row (clean card with rounded borders and shadow) ── */
   swipeContainer: { position: "relative", overflow: "hidden" },
   swipeActionLeft: {
     position: "absolute",
@@ -1109,27 +2283,106 @@ const useStyles = makeStyles((colors) => ({
   },
   swipeActionText: { color: "#FFFFFF", fontSize: 14, fontWeight: "600" },
 
-  taskRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.divider },
-  taskRowInner: { flex: 1, flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  taskRow: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  taskRowInner: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
   taskRowLast: { borderBottomWidth: 0 },
   rowPressed: { opacity: 0.65 },
 
-  checkboxTouch: { padding: 2, margin: -2 },
-  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: colors.borderStrong, alignItems: "center", justifyContent: "center", marginTop: 1, flexShrink: 0 },
-  checkboxDone: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  checkboxTouch: { padding: 4, margin: -4 },
+  checkbox: {
+    width: 19,
+    height: 19,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  checkboxDone: { backgroundColor: "#CBD5E1", borderColor: "#CBD5E1" },
 
-  taskContent: { flex: 1, gap: 4 },
-  taskTitle: { color: colors.onSurface, fontSize: 16, fontWeight: "500", lineHeight: 22 },
-  taskDone: { color: colors.muted, textDecorationLine: "line-through" },
+  taskContent: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+    gap: 2,
+  },
+  taskTitle: {
+    color: colors.onSurface,
+    fontSize: 15,
+    fontWeight: "500",
+    lineHeight: 20,
+  },
+  taskDone: {
+    color: "#9CA3AF",
+    fontWeight: "400",
+  },
+  taskRightMeta: {
+    alignItems: "flex-end",
+    justifyContent: "center",
+    gap: 2,
+    flexShrink: 0,
+    marginLeft: 8,
+  },
+  overdueBadge: {
+    backgroundColor: "#FEE2E2",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderWidth: 1,
+    borderColor: "#EF4444",
+    marginBottom: 2,
+  },
+  overdueBadgeText: {
+    color: "#DC2626",
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  postponeQuickBtn: {
+    padding: 2,
+    borderRadius: 4,
+  },
+  taskDateText: {
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  alarmIcon: {
+    marginTop: 1,
+  },
 
-  /* Meta row: date pill + person + list */
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 2 },
-  metaItem: { flexDirection: "row", alignItems: "center", gap: 4 },
-  metaText: { color: colors.muted, fontSize: 12, fontWeight: "400" },
-
-  /* Colored date pill */
-  datePill: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, backgroundColor: colors.surfaceSecondary },
-  datePillText: { color: colors.muted, fontSize: 11, fontWeight: "600" },
+  /* Meta line: person + list */
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    marginTop: 2,
+  },
+  metaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  metaText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "400",
+  },
+  metaDot: {
+    color: colors.muted,
+    fontSize: 12,
+  },
 
   undoToast: { position: "absolute", left: 16, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#1e2230", paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 12, elevation: 8, zIndex: 100 },
   undoToastText: { color: "#ffffff", fontSize: 14, fontWeight: "500" },
@@ -1155,10 +2408,262 @@ const useStyles = makeStyles((colors) => ({
   drawerLabelActive: { color: colors.onBrandTertiary },
   drawerHint: { color: colors.muted, fontSize: 11, marginTop: 2 },
   drawerCount: { color: colors.muted, fontSize: 12, fontWeight: "500", minWidth: 20, textAlign: "right" },
+  allDatesSubOptions: {
+    paddingLeft: 20,
+    marginTop: 2,
+    marginBottom: 4,
+    gap: 2,
+  },
+  subDrawerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  subDrawerRowActive: {
+    backgroundColor: colors.surfaceSecondary,
+  },
+  subDrawerLabel: {
+    color: colors.onSurfaceSecondary,
+    fontSize: 13,
+    fontWeight: "500",
+    flex: 1,
+  },
+  subDrawerLabelActive: {
+    color: colors.brandPrimary,
+    fontWeight: "700",
+  },
+  allDatesScopeContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 8,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  allDatesSegmentedControl: {
+    flexDirection: "row",
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  scopeSegment: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 7,
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    gap: 5,
+  },
+  scopeSegmentActive: {
+    backgroundColor: colors.brandPrimary,
+    shadowColor: colors.brandPrimary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  scopeSegmentText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  scopeSegmentTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  scopeBadge: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  scopeBadgeActive: {
+    backgroundColor: "rgba(255, 255, 255, 0.28)",
+  },
+  scopeBadgeText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  scopeBadgeTextActive: {
+    color: "#FFFFFF",
+  },
+  assigneeFilterBar: {
+    paddingVertical: 8,
+    backgroundColor: colors.surfaceSecondary,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  assigneeFilterScroll: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+  },
+  assigneeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  assigneeChipActive: {
+    backgroundColor: colors.brandTertiary,
+    borderColor: colors.brandPrimary,
+  },
+  assigneeChipText: {
+    color: colors.onSurface,
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  assigneeChipTextActive: {
+    color: colors.brandPrimary,
+    fontWeight: "700",
+  },
+  assigneeChipCount: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  assigneeChipCountActive: {
+    color: colors.brandPrimary,
+  },
+  assigneeSearchBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  assigneeSearchBtnText: {
+    color: colors.brandPrimary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  modalSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalSearchInput: {
+    flex: 1,
+    color: colors.onSurface,
+    fontSize: 14,
+    padding: 0,
+  },
 
   menuBackdrop: { flex: 1, backgroundColor: "transparent" },
   menuCard: { position: "absolute", right: 12, backgroundColor: colors.surface, borderRadius: 16, paddingVertical: 8, minWidth: 220, shadowColor: colors.surfaceInverse, shadowOpacity: 0.12, shadowRadius: 22, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
   menuItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
   menuLabel: { fontSize: 14, fontWeight: "500" },
   menuDivider: { height: 1, backgroundColor: colors.divider, marginVertical: 4 },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 400,
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: colors.onSurface,
+  },
+  modalSectionTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.muted,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  modalOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  modalOptionLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  modalOptionText: {
+    fontSize: 15,
+    color: colors.onSurface,
+    fontWeight: "500",
+  },
+  modalOptionTextActive: {
+    color: colors.brandPrimary,
+    fontWeight: "700",
+  },
+  modalActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginTop: 20,
+  },
+  modalButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  modalButtonPrimary: {
+    backgroundColor: colors.brandPrimary,
+  },
+  modalButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.onSurface,
+  },
+  modalButtonPrimaryText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.onBrandPrimary,
+  },
 }));
+

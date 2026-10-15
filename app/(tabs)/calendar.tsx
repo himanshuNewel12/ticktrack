@@ -1,7 +1,7 @@
 import { Ionicons as BaseIonicons } from "@expo/vector-icons";
 import { addDays, addMonths, endOfMonth, format, isSameDay, isSameMonth, isSameYear, startOfMonth, startOfWeek } from "date-fns";
 import { useMemo, useRef, useState, type ComponentType } from "react";
-import { ColorValue, Modal, PanResponder, Pressable, ScrollView, Switch, Text, View, Share, Platform } from "react-native";
+import { ColorValue, Linking, Modal, PanResponder, Pressable, ScrollView, Switch, Text, View, Share, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Fab } from "@/src/components/fab";
@@ -17,7 +17,7 @@ import {
   ShowItemIconsScreen,
 } from "@/src/components/view-options-subscreens";
 
-type LooseIconProps = { name: string; size: number; color?: ColorValue };
+type LooseIconProps = { name: string; size: number; color?: ColorValue; style?: any };
 const Ionicons = BaseIonicons as unknown as ComponentType<LooseIconProps>;
 
 type ViewMode = "list" | "year" | "month" | "week" | "3day" | "day";
@@ -47,7 +47,11 @@ export default function CalendarScreen() {
   const [arrangeTasksDrawer, setArrangeTasksDrawer] = useState(false);
   const [arrangeSettingsModal, setArrangeSettingsModal] = useState(false);
   const [shareModal, setShareModal] = useState(false);
+  const [filterRangeModal, setFilterRangeModal] = useState(false);
+  const [subscriptionModal, setSubscriptionModal] = useState(false);
+  const [filterRange, setFilterRange] = useState<"all" | "today" | "week" | "month" | "next30">("all");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
 
   // View Options state
   const [showDetails, setShowDetails] = useState(false);
@@ -100,11 +104,24 @@ export default function CalendarScreen() {
           if (!task.due_date) return false;
           if (!showCompleted && task.completed) return false;
           const parsed = parseTaskDate(task.due_date);
-          return parsed ? isSameDay(parsed, selected) : false;
+          if (!parsed) return false;
+          if (filterRange === "today") {
+            return isSameDay(parsed, today);
+          } else if (filterRange === "week") {
+            const nextWeek = addDays(today, 7);
+            return parsed >= today && parsed <= nextWeek;
+          } else if (filterRange === "month") {
+            return isSameMonth(parsed, today);
+          } else if (filterRange === "next30") {
+            const nextMonth = addDays(today, 30);
+            return parsed >= today && parsed <= nextMonth;
+          }
+          return isSameDay(parsed, selected);
         })
         .sort((a, b) => getTaskTimestamp(b) - getTaskTimestamp(a)),
-    [tasks, selected, showCompleted]
+    [tasks, selected, showCompleted, filterRange, today]
   );
+
 
   const goToday = () => setSelected(new Date());
 
@@ -226,14 +243,20 @@ export default function CalendarScreen() {
             <MenuItem
               icon="funnel-outline"
               label="Filter View Range"
-              onPress={() => setMenu(false)}
+              onPress={() => {
+                setMenu(false);
+                setFilterRangeModal(true);
+              }}
               styles={styles}
               colors={colors}
             />
             <MenuItem
               icon="wifi-outline"
               label="Calendar Subscription"
-              onPress={() => setMenu(false)}
+              onPress={() => {
+                setMenu(false);
+                setSubscriptionModal(true);
+              }}
               styles={styles}
               colors={colors}
             />
@@ -298,7 +321,30 @@ export default function CalendarScreen() {
         styles={styles}
         colors={colors}
       />
+
+      {/* Filter View Range Modal */}
+      <FilterRangeModal
+        visible={filterRangeModal}
+        filterRange={filterRange}
+        setFilterRange={(val) => {
+          setFilterRange(val);
+          showToast(`View range: ${val === "all" ? "Selected Date" : val === "today" ? "Today Only" : val === "week" ? "Next 7 Days" : val === "month" ? "This Month" : "Next 30 Days"}`);
+        }}
+        onClose={() => setFilterRangeModal(false)}
+        styles={styles}
+        colors={colors}
+      />
+
+      {/* Calendar Subscription Modal */}
+      <CalendarSubscriptionModal
+        visible={subscriptionModal}
+        onClose={() => setSubscriptionModal(false)}
+        onToast={showToast}
+        styles={styles}
+        colors={colors}
+      />
     </View>
+
   );
 }
 
@@ -814,6 +860,204 @@ function ShareScheduleModal(props: {
 }
 
 /* ============================================================================
+   FILTER VIEW RANGE MODAL
+   ============================================================================ */
+function FilterRangeModal(props: {
+  visible: boolean;
+  filterRange: "all" | "today" | "week" | "month" | "next30";
+  setFilterRange: (r: "all" | "today" | "week" | "month" | "next30") => void;
+  onClose: () => void;
+  styles: ReturnType<typeof useStyles>;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const { visible, filterRange, setFilterRange, onClose, styles, colors } = props;
+
+  const ranges: { key: "all" | "today" | "week" | "month" | "next30"; label: string; desc: string; icon: string }[] = [
+    { key: "all", label: "Selected Date (Default)", desc: "Show tasks scheduled on the selected day", icon: "calendar-outline" },
+    { key: "today", label: "Today Only", desc: "Focus strictly on tasks due today", icon: "today-outline" },
+    { key: "week", label: "Next 7 Days", desc: "Tasks due within the upcoming 7 days", icon: "calendar-number-outline" },
+    { key: "month", label: "This Month", desc: "All tasks due in the current calendar month", icon: "apps-outline" },
+    { key: "next30", label: "Next 30 Days", desc: "Tasks due over the next 30 days", icon: "time-outline" },
+  ];
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={styles.dialogBackdrop}>
+        <Pressable onPress={() => {}} style={[styles.dialogCard, { maxWidth: 360 }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <Text style={styles.dialogTitle}>Filter View Range</Text>
+            <Pressable onPress={onClose} hitSlop={8}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+          </View>
+          <Text style={styles.dialogSubtitle}>Choose the date range to display in your schedule view.</Text>
+
+          {ranges.map((r, i) => {
+            const isSelected = filterRange === r.key;
+            return (
+              <Pressable
+                key={r.key}
+                onPress={() => {
+                  setFilterRange(r.key);
+                  onClose();
+                }}
+                style={[
+                  styles.dialogOptionRow,
+                  { paddingVertical: 10, borderBottomWidth: i === ranges.length - 1 ? 0 : 1, borderBottomColor: colors.divider }
+                ]}
+              >
+                <Ionicons name={r.icon as never} size={20} color={isSelected ? colors.brandPrimary : colors.muted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.dialogOptionText, isSelected && { color: colors.brandPrimary, fontWeight: "700" }]}>
+                    {r.label}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>{r.desc}</Text>
+                </View>
+                {isSelected ? (
+                  <Ionicons name="checkmark-circle" size={20} color={colors.brandPrimary} />
+                ) : null}
+              </Pressable>
+            );
+          })}
+
+          <Pressable onPress={onClose} style={[styles.dialogOkButton, { marginTop: 16 }]}>
+            <Text style={styles.dialogOkText}>Close</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+/* ============================================================================
+   CALENDAR SUBSCRIPTION MODAL
+   ============================================================================ */
+function CalendarSubscriptionModal(props: {
+  visible: boolean;
+  onClose: () => void;
+  onToast: (msg: string) => void;
+  styles: ReturnType<typeof useStyles>;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const { visible, onClose, onToast, styles, colors } = props;
+  const feedUrl = "https://planner.newel.local/api/calendar/feed.ics";
+
+  const handleCopyLink = async () => {
+    try {
+      if (typeof navigator !== "undefined" && (navigator as any).clipboard) {
+        await (navigator as any).clipboard.writeText(feedUrl);
+      } else {
+        await Share.share({ message: feedUrl, url: feedUrl, title: "Calendar Subscription Feed" });
+      }
+      onToast("Calendar subscription link copied!");
+    } catch {
+      onToast("Copied calendar feed link");
+    }
+  };
+
+  const handleOpenSubscribe = async () => {
+    const webcalUrl = "webcal://planner.newel.local/api/calendar/feed.ics";
+    try {
+      const canOpen = await Linking.canOpenURL(webcalUrl);
+      if (canOpen) {
+        await Linking.openURL(webcalUrl);
+      } else {
+        await Share.share({ message: feedUrl, url: feedUrl, title: "Calendar Subscription Feed" });
+      }
+    } catch {
+      await Share.share({ message: feedUrl, url: feedUrl, title: "Calendar Subscription Feed" });
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={styles.dialogBackdrop}>
+        <Pressable onPress={() => {}} style={[styles.dialogCard, { maxWidth: 380, maxHeight: "88%" }]}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="wifi-outline" size={22} color={colors.brandPrimary} />
+                <Text style={styles.dialogTitle}>Calendar Subscription</Text>
+              </View>
+              <Pressable onPress={onClose} hitSlop={8}>
+                <Ionicons name="close" size={20} color={colors.muted} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.dialogSubtitle}>
+              Sync your scheduled tasks seamlessly with Apple Calendar, Google Calendar, or Microsoft Outlook via iCal feed.
+            </Text>
+
+            {/* Feed URL Box */}
+            <View style={{ backgroundColor: colors.surfaceSecondary, borderRadius: 14, padding: 12, marginVertical: 10, borderWidth: 1, borderColor: colors.border }}>
+              <Text style={{ fontSize: 11, fontWeight: "600", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
+                Your iCal Feed URL
+              </Text>
+              <Text numberOfLines={1} ellipsizeMode="middle" style={{ fontSize: 13, color: colors.onSurface, fontWeight: "500", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }}>
+                {feedUrl}
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: "row", gap: 10, marginBottom: 18 }}>
+              <Pressable
+                onPress={handleCopyLink}
+                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.brandTertiary, paddingVertical: 10, borderRadius: 10 }}
+              >
+                <Ionicons name="copy-outline" size={16} color={colors.brandPrimary} />
+                <Text style={{ color: colors.brandPrimary, fontWeight: "700", fontSize: 13 }}>Copy Link</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleOpenSubscribe}
+                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.brandPrimary, paddingVertical: 10, borderRadius: 10 }}
+              >
+                <Ionicons name="open-outline" size={16} color={colors.onBrandPrimary} />
+                <Text style={{ color: colors.onBrandPrimary, fontWeight: "700", fontSize: 13 }}>Subscribe</Text>
+              </Pressable>
+            </View>
+
+            {/* Instructions */}
+            <Text style={{ fontSize: 13, fontWeight: "700", color: colors.onSurface, marginBottom: 8 }}>
+              How to Add to Your Calendar
+            </Text>
+
+            <View style={{ gap: 10, marginBottom: 14 }}>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Ionicons name="logo-apple" size={18} color={colors.onSurface} style={{ marginTop: 2 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.onSurface }}>Apple Calendar</Text>
+                  <Text style={{ fontSize: 12, color: colors.muted, marginTop: 1 }}>File → New Calendar Subscription → Paste URL and click Subscribe.</Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Ionicons name="logo-google" size={18} color={colors.onSurface} style={{ marginTop: 2 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.onSurface }}>Google Calendar</Text>
+                  <Text style={{ fontSize: 12, color: colors.muted, marginTop: 1 }}>Other calendars (+) → From URL → Paste URL and Add Calendar.</Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Ionicons name="mail-outline" size={18} color={colors.onSurface} style={{ marginTop: 2 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.onSurface }}>Outlook Calendar</Text>
+                  <Text style={{ fontSize: 12, color: colors.muted, marginTop: 1 }}>Add calendar → Subscribe from web → Paste URL and Save.</Text>
+                </View>
+              </View>
+            </View>
+
+            <Pressable onPress={onClose} style={styles.dialogOkButton}>
+              <Text style={styles.dialogOkText}>Done</Text>
+            </Pressable>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+
+/* ============================================================================
    EXISTING CALENDAR SUB-COMPONENTS
    ============================================================================ */
 function MonthGrid({ selected, today, tasks, onSelect, styles, colors }: { selected: Date; today: Date; tasks: Task[]; onSelect: (d: Date) => void; styles: ReturnType<typeof useStyles>; colors: ReturnType<typeof useTheme>["colors"] }) {
@@ -1033,7 +1277,7 @@ function TaskEvent({ task, onToggle, showDetails, styles, colors }: { task: Task
     <View style={styles.eventCard} testID={`event-${task.id}`}>
       <View style={[styles.eventBar, { backgroundColor: priorityColor }]} />
       <Pressable onPress={onToggle} style={[styles.checkboxSmall, task.completed && styles.checkboxDone]}>
-        <Ionicons name="checkmark" size={13} color={task.completed ? colors.onBrandPrimary : "transparent"} />
+        <Ionicons name="checkmark" size={11} color={task.completed ? colors.onBrandPrimary : "transparent"} />
       </Pressable>
       <View style={{ flex: 1 }}>
         <Text style={styles.eventTitle}>{task.title}</Text>
@@ -1118,7 +1362,7 @@ const useStyles = makeStyles((colors) => ({
   scheduledList: { marginTop: 22 },
   eventCard: { minHeight: 66, borderRadius: 14, backgroundColor: colors.surfaceSecondary, marginBottom: 10, padding: 12, flexDirection: "row", alignItems: "center", gap: 10 },
   eventBar: { width: 4, height: 36, borderRadius: 2 },
-  checkboxSmall: { width: 22, height: 22, borderRadius: 8, borderWidth: 1.5, borderColor: colors.borderStrong, alignItems: "center", justifyContent: "center" },
+  checkboxSmall: { width: 18, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: colors.borderStrong, alignItems: "center", justifyContent: "center" },
   checkboxDone: { backgroundColor: colors.success, borderColor: colors.success },
   eventTitle: { color: colors.onSurface, fontSize: 14, fontWeight: "600" },
   eventMeta: { color: colors.muted, fontSize: 11, marginTop: 3 },

@@ -3,8 +3,8 @@ import { PropsWithChildren, createContext, useCallback, useContext, useEffect, u
 import { api, postJson } from "@/src/api";
 import { storage } from "@/src/utils/storage";
 import { getTaskTimestamp } from "@/src/utils/date-utils";
-import { requestNotificationPermissions, scheduleTaskNotification, cancelTaskNotification, syncAllTaskNotifications } from "@/src/utils/notification-service";
-import type { AssignableUser, CatalogHabit, Habit, Reminder, Task, TaskList, User } from "@/src/types";
+import { requestNotificationPermissions, scheduleTaskNotification, cancelTaskNotification, syncAllTaskNotifications, cancelAllTaskNotifications, registerForPushNotificationsAsync, Notifications } from "@/src/utils/notification-service";
+import type { AppNotification, AssignableUser, CatalogHabit, Habit, Reminder, Task, TaskAction, TaskList, UpdateTaskPayload, User } from "@/src/types";
 
 type AppContextValue = {
   token: string | null;
@@ -15,6 +15,8 @@ type AppContextValue = {
   reminders: Reminder[];
   lists: TaskList[];
   assignableUsers: AssignableUser[];
+  notifications: AppNotification[];
+  unreadNotificationCount: number;
   loading: boolean;
   onboarded: boolean;
   error: string | null;
@@ -22,9 +24,13 @@ type AppContextValue = {
   signOut: () => Promise<void>;
   markOnboarded: () => Promise<void>;
   addTask: (payload: Record<string, unknown>) => Promise<void>;
+  editTask: (task: Task, payload: UpdateTaskPayload) => Promise<void>;
   toggleTask: (task: Task) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
+  postponeTask: (task: Task, payload: { endDate: string; startDate?: string; startTime?: string; endTime?: string; remarks?: string }) => Promise<void>;
   dismissReminder: (task: Task, reminderKey: string) => Promise<void>;
+  markNotificationRead: (id: string) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
   addHabit: (habit: CatalogHabit | { name: string; category: string }) => Promise<void>;
   toggleHabit: (habit: Habit) => Promise<void>;
   addList: (payload: { name: string; emoji?: string; color?: string }) => Promise<TaskList>;
@@ -82,12 +88,83 @@ function toLocalDateString(isoOrDateStr: string | null | undefined): string | nu
   return datePart;
 }
 
+export function toIsoDateTime(date: string, time?: string, endOfDayIfNoTime = false): string | null {
+  if (!date) return null;
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) return null;
+
+  let hours = endOfDayIfNoTime ? 23 : 0;
+  let minutes = endOfDayIfNoTime ? 59 : 0;
+
+  if (time) {
+    const [h, m] = time.split(":").map(Number);
+    if (Number.isFinite(h)) hours = h;
+    if (Number.isFinite(m)) minutes = m;
+  }
+
+  return new Date(year, month - 1, day, hours, minutes, 0, 0).toISOString();
+}
+
 function normalizeTask(raw: any): Task {
   const rawDate = raw.endDate ?? raw.startDate ?? raw.plannedEnd ?? raw.plannedStart ?? raw.due_date;
   const due_date = toLocalDateString(rawDate);
-  const assigneeName = raw.assignee
-    ? (raw.assignee.name ?? `${raw.assignee.firstName ?? ""} ${raw.assignee.lastName ?? ""}`).trim()
-    : raw.assigneeName ?? null;
+
+  const rawAssigneesList: string[] = [];
+  const normalizedAssignees: { id: string; name: string; email?: string }[] = [];
+
+  if (Array.isArray(raw.taskAssignees) && raw.taskAssignees.length > 0) {
+    raw.taskAssignees.forEach((ta: any) => {
+      const u = ta.user ?? ta;
+      const uid = u.id ?? u.userId ?? ta.userId;
+      if (uid) {
+        const idStr = String(uid);
+        rawAssigneesList.push(idStr);
+        const name = (u.name ?? `${u.firstName ?? ""} ${u.lastName ?? ""}`).trim() || u.email || "Unknown";
+        normalizedAssignees.push({ id: idStr, name, email: u.email });
+      }
+    });
+  } else if (raw.assignee) {
+    const u = raw.assignee;
+    const idStr = String(u.id);
+    rawAssigneesList.push(idStr);
+    const name = (u.name ?? `${u.firstName ?? ""} ${u.lastName ?? ""}`).trim() || u.email || "Unknown";
+    normalizedAssignees.push({ id: idStr, name, email: u.email });
+  }
+
+  if (raw.assigneeId) rawAssigneesList.push(String(raw.assigneeId));
+  if (Array.isArray(raw.assigneeIds)) {
+    raw.assigneeIds.forEach((id: any) => {
+      if (id) rawAssigneesList.push(String(id));
+    });
+  }
+  const uniqueAssigneeIds = Array.from(new Set(rawAssigneesList));
+
+  const allAssigneeNames = normalizedAssignees.map((a) => a.name).filter(Boolean);
+  const assigneeName =
+    allAssigneeNames.length > 0
+      ? allAssigneeNames.join(", ")
+      : raw.assignee
+      ? (raw.assignee.name ?? `${raw.assignee.firstName ?? ""} ${raw.assignee.lastName ?? ""}`).trim()
+      : raw.assigneeName ?? null;
+
+  const creatorUser = raw.createdBy ?? null;
+  const creatorName = creatorUser
+    ? (creatorUser.name ?? `${creatorUser.firstName ?? ""} ${creatorUser.lastName ?? ""}`).trim() || creatorUser.email
+    : raw.createdByName ?? null;
+
+  const rawAuditLogs = Array.isArray(raw.auditLogs) ? raw.auditLogs : [];
+  const auditActions: TaskAction[] = rawAuditLogs.map((al: any) => ({
+    id: al.id,
+    type: al.action,
+    remarks: al.reason ?? null,
+    before: al.before,
+    after: al.after,
+    createdAt: al.createdAt,
+    actor: al.user ?? null,
+    actorName: al.user
+      ? `${al.user.firstName ?? ""} ${al.user.lastName ?? ""}`.trim() || al.user.email
+      : null,
+  }));
 
   return {
     ...raw,
@@ -95,38 +172,109 @@ function normalizeTask(raw: any): Task {
     title: raw.title,
     notes: raw.description ?? raw.notes ?? "",
     due_date,
+    startAt: raw.startDate ?? raw.plannedStart ?? null,
+    endAt: raw.endDate ?? raw.plannedEnd ?? null,
+    window: raw.window ?? null,
+    postponeCount: raw.postponeCount ?? 0,
     priority: (raw.priority ?? "MEDIUM").toLowerCase() as any,
     completed: raw.completed ?? raw.status === "COMPLETED",
     list_id: raw.projectId ?? raw.list_id ?? "inbox",
     projectId: raw.projectId ?? raw.list_id ?? null,
-    assigneeId: raw.assigneeId ?? raw.assignee?.id ?? null,
+    assigneeId: raw.assigneeId ?? raw.assignee?.id ?? (uniqueAssigneeIds[0] || null),
+    assigneeIds: uniqueAssigneeIds,
+    assignees: normalizedAssignees.length > 0 ? normalizedAssignees : null,
     assigneeName: assigneeName || null,
     source: "task",
+    createdById: raw.createdById ?? creatorUser?.id ?? null,
+    createdBy: creatorUser,
+    createdByName: creatorName,
+    actions: auditActions,
+    auditLogs: rawAuditLogs,
   };
 }
 
 function normalizeActivity(act: any): Task {
   const isCompleted = act.status === "COMPLETED";
-  const rawAssignee = act.assignees?.[0];
-  const primaryAssigneeUser = rawAssignee?.user ?? (rawAssignee?.userId || rawAssignee?.name ? rawAssignee : null);
-  const assigneeName = primaryAssigneeUser
-    ? (primaryAssigneeUser.name ?? `${primaryAssigneeUser.firstName ?? ""} ${primaryAssigneeUser.lastName ?? ""}`).trim()
-    : act.createdByName ?? null;
+
+  const actAssigneesList: string[] = [];
+  const normalizedAssignees: { id: string; name: string; email?: string; avatarUrl?: string }[] = [];
+
+  if (Array.isArray(act.assignees)) {
+    act.assignees.forEach((a: any) => {
+      const u = a.user ?? a;
+      const uid = u.id ?? u.userId ?? a.userId;
+      if (uid) {
+        const idStr = String(uid);
+        actAssigneesList.push(idStr);
+        const name = (u.name ?? `${u.firstName ?? ""} ${u.lastName ?? ""}`).trim() || u.email || "Unknown";
+        normalizedAssignees.push({
+          id: idStr,
+          name,
+          email: u.email,
+          avatarUrl: u.avatarUrl,
+        });
+      }
+    });
+  }
+
+  if (Array.isArray(act.assigneeIds)) {
+    act.assigneeIds.forEach((id: any) => {
+      if (id) actAssigneesList.push(String(id));
+    });
+  }
+  const uniqueActAssigneeIds = Array.from(new Set(actAssigneesList));
+
+  const allAssigneeNames = normalizedAssignees.map((a) => a.name).filter(Boolean);
+  const assigneeName = allAssigneeNames.length > 0 ? allAssigneeNames.join(", ") : (act.createdByName ?? null);
+
   const startIso = act.startAt ? String(act.startAt) : null;
+  const endIso = act.endAt ? String(act.endAt) : null;
   const dateStr = toLocalDateString(startIso);
+
+  const creatorUser = act.createdBy ?? null;
+  const creatorName = creatorUser
+    ? (creatorUser.name ?? `${creatorUser.firstName ?? ""} ${creatorUser.lastName ?? ""}`).trim() || creatorUser.email
+    : act.createdByName ?? null;
+
+  const actions: TaskAction[] = Array.isArray(act.actions)
+    ? act.actions.map((ac: any) => ({
+        id: ac.id,
+        type: ac.type,
+        remarks: ac.remarks ?? null,
+        createdAt: ac.createdAt,
+        fromStartAt: ac.fromStartAt ? String(ac.fromStartAt) : null,
+        fromEndAt: ac.fromEndAt ? String(ac.fromEndAt) : null,
+        toStartAt: ac.toStartAt ? String(ac.toStartAt) : null,
+        toEndAt: ac.toEndAt ? String(ac.toEndAt) : null,
+        actor: ac.actor ?? null,
+        actorName: ac.actor
+          ? `${ac.actor.firstName ?? ""} ${ac.actor.lastName ?? ""}`.trim() || ac.actor.email
+          : null,
+      }))
+    : [];
 
   return {
     id: act.id,
     title: act.name ?? act.title ?? "Untitled",
     notes: act.description ?? act.notes ?? "",
     due_date: dateStr,
+    startAt: startIso,
+    endAt: endIso,
+    window: act.window ?? null,
+    postponeCount: act.postponeCount ?? 0,
     priority: "medium",
     completed: isCompleted,
     list_id: "inbox",
-    assigneeId: primaryAssigneeUser?.id ?? primaryAssigneeUser?.userId ?? null,
+    assigneeId: uniqueActAssigneeIds[0] || null,
+    assigneeIds: uniqueActAssigneeIds,
+    assignees: normalizedAssignees.length > 0 ? normalizedAssignees : null,
     assigneeName: assigneeName || null,
     source: "activity",
     created_at: act.createdAt ?? new Date().toISOString(),
+    createdById: act.createdById ?? creatorUser?.id ?? null,
+    createdBy: creatorUser,
+    createdByName: creatorName,
+    actions,
   };
 }
 
@@ -141,15 +289,33 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [lists, setLists] = useState<TaskList[]>([]);
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [onboarded, setOnboarded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const unreadNotificationCount = useMemo(
+    () => notifications.filter((n) => !n.isRead).length,
+    [notifications]
+  );
+
+  const markNotificationRead = async (id: string) => {
+    if (!token) return;
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    await api(`/user-alerts/${id}/read`, { method: "PATCH" }, token).catch(() => {});
+  };
+
+  const markAllNotificationsRead = async () => {
+    if (!token) return;
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    await api("/user-alerts/mark-all-read", { method: "PATCH" }, token).catch(() => {});
+  };
 
   const refresh = useCallback(async () => {
     if (!token) return;
     try {
       setError(null);
-      const [rawTasks, mineRes, assignedRes, nextHabits, nextCatalog, nextReminders, nextLists, nextAssignables, savedDeletedIds] = await Promise.all([
+      const [rawTasks, mineRes, assignedRes, nextHabits, nextCatalog, nextReminders, nextLists, nextAssignables, nextAlerts, savedDeletedIds] = await Promise.all([
         api<any[]>("/tasks", {}, token).catch(() => []),
         api<{ data?: any[] }>("/activities/mine?limit=100", {}, token).catch(() => ({ data: [] })),
         api<{ data?: any[] }>("/activities/assigned?limit=100", {}, token).catch(() => ({ data: [] })),
@@ -158,6 +324,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         api<Reminder[]>("/reminders/due", {}, token).catch(() => []),
         api<TaskList[]>("/lists", {}, token).catch(() => []),
         api<AssignableUser[]>("/users/assignable", {}, token).catch(() => []),
+        api<AppNotification[]>("/user-alerts?limit=50", {}, token).catch(() => []),
         storage.getItem<any>("ticktrack_deleted_task_ids", null),
       ]);
 
@@ -175,8 +342,35 @@ export function AppProvider({ children }: PropsWithChildren) {
       setTasks(allTasks);
       setHabits(nextHabits);
       setCatalog(nextCatalog);
-      setReminders(nextReminders);
-      setLists(nextLists);
+      setNotifications(Array.isArray(nextAlerts) ? nextAlerts : []);
+      let resolvedLists = nextLists;
+      if (resolvedLists.length === 0) {
+        const savedOnboardingLists = await storage.getItem<any>("ticktrack_onboarding_lists", null);
+        const listNames: string[] = Array.isArray(savedOnboardingLists)
+          ? savedOnboardingLists
+          : typeof savedOnboardingLists === "string"
+          ? JSON.parse(savedOnboardingLists)
+          : [];
+        if (listNames.length > 0) {
+          const listEmojis: Record<string, string> = {
+            Work: "💼",
+            Personal: "🏠",
+            Shopping: "📦",
+            Learning: "📖",
+            "Wish List": "🦄",
+            Fitness: "🏃",
+          };
+          const createdListPromises = listNames.map((name) =>
+            postJson<TaskList>("/lists", { name, emoji: listEmojis[name] || "📋" }, token).catch(() => null)
+          );
+          const createdLists = (await Promise.all(createdListPromises)).filter(Boolean) as TaskList[];
+          if (createdLists.length > 0) {
+            resolvedLists = createdLists;
+            await storage.removeItem("ticktrack_onboarding_lists");
+          }
+        }
+      }
+      setLists(resolvedLists);
       setAssignableUsers(nextAssignables);
       void syncAllTaskNotifications(allTasks);
     } catch (err) {
@@ -252,6 +446,35 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   useEffect(() => { if (token) void refresh(); }, [token, refresh]);
 
+  // Register push notifications with backend when user is authenticated
+  useEffect(() => {
+    if (!token) return;
+    void registerForPushNotificationsAsync().then((pushToken) => {
+      if (pushToken && token) {
+        api("/user-alerts/push-token", {
+          method: "PUT",
+          body: JSON.stringify({ pushToken }),
+        }, token).catch((e) => {
+          console.warn("Could not register push token with backend:", e);
+        });
+      }
+    });
+  }, [token]);
+
+  // Listen for push notification interactions (tap / receive)
+  useEffect(() => {
+    if (!Notifications?.addNotificationResponseReceivedListener) return;
+    const subscription = Notifications.addNotificationResponseReceivedListener((response: any) => {
+      const data = response?.notification?.request?.content?.data;
+      if (data && token) {
+        void refresh();
+      }
+    });
+    return () => {
+      subscription?.remove?.();
+    };
+  }, [token, refresh]);
+
   // Midnight auto-logout timer: triggers logout at 12:00 AM local time
   useEffect(() => {
     if (!token) return;
@@ -286,15 +509,16 @@ export function AppProvider({ children }: PropsWithChildren) {
   };
 
   const signOut = async () => {
+    if (token) {
+      void api("/user-alerts/push-token", {
+        method: "PUT",
+        body: JSON.stringify({ pushToken: null }),
+      }, token).catch(() => {});
+    }
     await storage.secureRemove("ticktrack_token");
     await storage.removeItem("ticktrack_login_date");
     // Cancel all pending notifications so they don't fire / re-duplicate on next sign-in
-    try {
-      const Notifications = require("expo-notifications");
-      if (Notifications?.cancelAllScheduledNotificationsAsync) {
-        await Notifications.cancelAllScheduledNotificationsAsync();
-      }
-    } catch {}
+    await cancelAllTaskNotifications();
     setToken(null); setUser(null); setTasks([]); setHabits([]); setReminders([]); setLists([]);
   };
 
@@ -314,6 +538,14 @@ export function AppProvider({ children }: PropsWithChildren) {
     if (!token) return;
     const isProjectList = payload.list_id && payload.list_id !== "inbox" && payload.list_id !== "personal" && payload.list_id !== "work";
 
+    const assigneeIdsPayload: string[] = Array.isArray(payload.assigneeIds)
+      ? (payload.assigneeIds as any[]).map(String).filter(Boolean)
+      : payload.assignee_id
+        ? [String(payload.assignee_id)]
+        : payload.assigneeId
+          ? [String(payload.assigneeId)]
+          : [];
+
     if (isProjectList) {
       const priorityMap: Record<string, string> = {
         low: "LOW",
@@ -331,7 +563,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         priority: formattedPriority,
         ...(payload.notes ? { description: String(payload.notes) } : {}),
         ...(payload.due_date ? { endDate: toIsoTimestamp(String(payload.due_date)) } : {}),
-        ...(payload.assignee_id ? { assigneeId: String(payload.assignee_id) } : payload.assigneeId ? { assigneeId: String(payload.assigneeId) } : {}),
+        ...(assigneeIdsPayload.length
+          ? {
+              assigneeId: assigneeIdsPayload[0],
+              assigneeIds: assigneeIdsPayload,
+            }
+          : {}),
       };
 
       const createdRaw = await postJson<any>("/tasks", body, token);
@@ -350,7 +587,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         startAt,
         endAt,
         allDay: !hasTime,
-        ...(payload.assignee_id ? { assigneeIds: [String(payload.assignee_id)] } : payload.assigneeId ? { assigneeIds: [String(payload.assigneeId)] } : {}),
+        ...(assigneeIdsPayload.length ? { assigneeIds: assigneeIdsPayload } : {}),
       };
 
       const createdRaw = await postJson<any>("/activities", body, token);
@@ -362,25 +599,159 @@ export function AppProvider({ children }: PropsWithChildren) {
     await refresh();
   };
 
+  const editTask = async (task: Task, payload: UpdateTaskPayload) => {
+    if (!token) return;
+    try {
+      if (task.source === "activity") {
+        const body: Record<string, unknown> = {};
+        if (payload.title !== undefined) body.name = payload.title.trim();
+        if (payload.notes !== undefined) body.description = payload.notes.trim();
+        if (payload.assigneeIds !== undefined) body.assigneeIds = payload.assigneeIds;
+        if (payload.due_date !== undefined) {
+          if (payload.due_date) {
+            const hasTime = payload.due_date.includes("T");
+            body.startAt = hasTime ? toIsoTimestamp(payload.due_date) : `${payload.due_date}T09:00:00.000Z`;
+            body.endAt = hasTime ? toIsoTimestamp(payload.due_date) : `${payload.due_date}T18:00:00.000Z`;
+            body.allDay = !hasTime;
+          }
+        }
+        const updatedRaw = await api<any>(
+          `/activities/${task.id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify(body),
+          },
+          token
+        );
+        if (updatedRaw) {
+          const updated = normalizeActivity(updatedRaw);
+          setTasks((current) => current.map((t) => (t.id === task.id ? updated : t)));
+        }
+      } else {
+        const body: Record<string, unknown> = {};
+        if (payload.title !== undefined) body.title = payload.title.trim();
+        if (payload.notes !== undefined) body.description = payload.notes.trim();
+        if (payload.priority !== undefined) {
+          const priorityMap: Record<string, string> = { low: "LOW", medium: "MEDIUM", high: "HIGH", critical: "CRITICAL", none: "MEDIUM" };
+          body.priority = priorityMap[payload.priority.toLowerCase()] ?? "MEDIUM";
+        }
+        if (payload.due_date !== undefined) {
+          body.endDate = payload.due_date ? toIsoTimestamp(payload.due_date) : null;
+        }
+        if (payload.assigneeIds !== undefined) {
+          body.assigneeIds = payload.assigneeIds;
+          body.assigneeId = payload.assigneeIds[0] ?? null;
+        }
+        const updatedRaw = await api<any>(
+          `/tasks/${task.id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify(body),
+          },
+          token
+        );
+        if (updatedRaw) {
+          const updated = normalizeTask(updatedRaw);
+          setTasks((current) => current.map((t) => (t.id === task.id ? updated : t)));
+        }
+      }
+    } finally {
+      await refresh();
+    }
+  };
+
   const toggleTask = async (task: Task) => {
     if (!token) return;
     const newCompleted = !task.completed;
-    if (task.source === "activity") {
-      const path = newCompleted ? `/activities/${task.id}/complete` : `/activities/${task.id}/status`;
-      const body = newCompleted ? {} : { status: "PENDING" };
-      await api<any>(path, { method: "PATCH", body: JSON.stringify(body) }, token).catch(() => null);
-    } else {
-      const newStatus = newCompleted ? "COMPLETED" : "WIP";
-      await api<any>(`/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: newStatus, progressPct: newCompleted ? 100 : 0 }) }, token).catch(() => null);
+    let updatedTaskObj: Task | null = null;
+    try {
+      if (task.source === "activity") {
+        const path = newCompleted ? `/activities/${task.id}/complete` : `/activities/${task.id}/status`;
+        const body = newCompleted ? {} : { status: "PENDING" };
+        const res = await api<any>(path, { method: "PATCH", body: JSON.stringify(body) }, token);
+        if (res) {
+          updatedTaskObj = normalizeActivity(res);
+        }
+      } else {
+        const newStatus = newCompleted ? "COMPLETED" : "WIP";
+        const res = await api<any>(`/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: newStatus, progressPct: newCompleted ? 100 : 0 }) }, token);
+        if (res) {
+          updatedTaskObj = normalizeTask(res);
+        }
+      }
+    } catch (err) {
+      console.warn("toggleTask failed", err);
     }
-    const updatedTask = { ...task, completed: newCompleted };
-    setTasks((current) => current.map((item) => item.id === task.id ? updatedTask : item));
+
+    const fallbackUpdated = { ...task, completed: newCompleted };
+    const finalTask = updatedTaskObj ?? fallbackUpdated;
+    setTasks((current) => current.map((item) => (item.id === task.id ? finalTask : item)));
     if (newCompleted) {
       void cancelTaskNotification(task.id);
     } else {
-      void scheduleTaskNotification(updatedTask);
+      void scheduleTaskNotification(finalTask);
     }
     void refreshReminders();
+    await refresh();
+  };
+
+  const postponeTask = async (
+    task: Task,
+    payload: { endDate: string; startDate?: string; startTime?: string; endTime?: string; remarks?: string }
+  ) => {
+    if (!token) return;
+    const { endDate, remarks } = payload;
+    const startDate = payload.startDate || endDate;
+
+    let origStartTime = payload.startTime;
+    let origEndTime = payload.endTime;
+    if (!origStartTime && task.startAt && task.startAt.includes("T")) {
+      origStartTime = task.startAt.split("T")[1]?.slice(0, 5);
+    }
+    if (!origEndTime && task.endAt && task.endAt.includes("T")) {
+      origEndTime = task.endAt.split("T")[1]?.slice(0, 5);
+    }
+
+    const startAt = toIsoDateTime(startDate, origStartTime || "09:00") || `${startDate}T09:00:00.000Z`;
+    const endAt = toIsoDateTime(endDate, origEndTime || "18:00", true) || `${endDate}T18:00:00.000Z`;
+
+    if (task.source === "activity") {
+      const res = await api<any>(
+        `/activities/${task.id}/postpone`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            startAt,
+            endAt,
+            allDay: false,
+            remarks: remarks?.trim() || undefined,
+          }),
+        },
+        token
+      ).catch(() => null);
+      if (res) {
+        const norm = normalizeActivity(res);
+        setTasks((current) => current.map((item) => (item.id === task.id ? norm : item)));
+      }
+    } else {
+      const res = await api<any>(
+        `/tasks/${task.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            startDate: startAt,
+            endDate: endAt,
+          }),
+        },
+        token
+      ).catch(() => null);
+      if (res) {
+        const norm = normalizeTask(res);
+        setTasks((current) => current.map((item) => (item.id === task.id ? norm : item)));
+      }
+    }
+
+    await refresh();
   };
 
   const dismissReminder = async (task: Task, reminderKey: string) => {
@@ -459,7 +830,57 @@ export function AppProvider({ children }: PropsWithChildren) {
     });
   };
 
-  const value = useMemo(() => ({ token, user, tasks, habits, catalog, reminders, lists, assignableUsers, loading, onboarded, error, signIn, signOut, markOnboarded, addTask, toggleTask, deleteTask, dismissReminder, addHabit, toggleHabit, addList, deleteList, reorderLists, updateUser, refresh }), [token, user, tasks, habits, catalog, reminders, lists, assignableUsers, loading, onboarded, error, refresh]);
+  const value = useMemo(
+    () => ({
+      token,
+      user,
+      tasks,
+      habits,
+      catalog,
+      reminders,
+      lists,
+      assignableUsers,
+      notifications,
+      unreadNotificationCount,
+      loading,
+      onboarded,
+      error,
+      signIn,
+      signOut,
+      markOnboarded,
+      addTask,
+      editTask,
+      toggleTask,
+      deleteTask,
+      postponeTask,
+      dismissReminder,
+      markNotificationRead,
+      markAllNotificationsRead,
+      addHabit,
+      toggleHabit,
+      addList,
+      deleteList,
+      reorderLists,
+      updateUser,
+      refresh,
+    }),
+    [
+      token,
+      user,
+      tasks,
+      habits,
+      catalog,
+      reminders,
+      lists,
+      assignableUsers,
+      notifications,
+      unreadNotificationCount,
+      loading,
+      onboarded,
+      error,
+      refresh,
+    ]
+  );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

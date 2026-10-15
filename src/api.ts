@@ -18,7 +18,10 @@ function getHostIp(): string | null {
 
 function resolveBaseUrl(): string {
   const rawUrl = (
-    Constants.expoConfig?.extra?.backendUrl ?? process.env.EXPO_PUBLIC_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? ""
+    process.env.EXPO_PUBLIC_API_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    Constants.expoConfig?.extra?.backendUrl ??
+    ""
   ).replace(/\/$/, "");
 
   const detectedIp = getHostIp();
@@ -35,7 +38,8 @@ function resolveBaseUrl(): string {
       }
       return `http://${detectedIp}:4001/api/v1`;
     }
-    return rawUrl || "http://10.0.2.2:4001/api/v1";
+    // Fall back to local network IP or emulator IP
+    return rawUrl ? rawUrl.replace(/localhost|127\.0\.0\.1/, "10.155.19.52") : "http://10.155.19.52:4001/api/v1";
   }
 
   if (rawUrl.includes("localhost") || rawUrl.includes("127.0.0.1")) {
@@ -49,6 +53,9 @@ function resolveBaseUrl(): string {
 }
 
 const baseUrl = resolveBaseUrl();
+if (__DEV__) {
+  console.log("[TickTrack API] Target URL:", baseUrl);
+}
 
 export async function api<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
@@ -56,14 +63,39 @@ export async function api<T>(path: string, options: RequestInit = {}, token?: st
     ? `${baseUrl}${normalizedPath}`
     : `${baseUrl}/api/v1${normalizedPath}`;
 
-  let response = await fetch(targetUrl, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}`, Cookie: `access_token=${token}` } : {}),
-      ...(options.headers ?? {}),
-    },
-  });
+  const executeFetch = () =>
+    fetch(targetUrl, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}`, Cookie: `access_token=${token}` } : {}),
+        ...(options.headers ?? {}),
+      },
+    });
+
+  let response: Response;
+  try {
+    response = await executeFetch();
+  } catch (err: any) {
+    const errorStr = String(err?.message || err);
+    // Transient HTTP/2 stream reset or connection drop retry
+    if (errorStr.includes("StreamResetException") || errorStr.includes("stream was reset") || errorStr.includes("fetch failed")) {
+      await new Promise((r) => setTimeout(r, 300));
+      try {
+        response = await executeFetch();
+      } catch (retryErr: any) {
+        const isLocal = targetUrl.includes("localhost") || targetUrl.includes("127.0.0.1") || targetUrl.includes("10.") || targetUrl.includes("192.168.");
+        const hint = isLocal ? " Please ensure your phone is connected to the same Wi-Fi." : "";
+        const finalErr = String(retryErr?.message || retryErr || errorStr);
+        throw new Error(`Unable to reach backend at ${targetUrl}. (${finalErr})${hint}`);
+      }
+    } else {
+      const isLocal = targetUrl.includes("localhost") || targetUrl.includes("127.0.0.1") || targetUrl.includes("10.") || targetUrl.includes("192.168.");
+      const hint = isLocal ? " Please ensure your phone is connected to the same Wi-Fi." : "";
+      throw new Error(`Unable to reach backend at ${targetUrl}. (${errorStr})${hint}`);
+    }
+  }
 
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {

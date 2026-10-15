@@ -9,6 +9,10 @@ import { queryClient } from "@/src/query-client";
 import { AppProvider } from "@/src/app-context";
 import { useTheme } from "@/src/theme";
 
+import * as SplashScreen from "expo-splash-screen";
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 // Disable logbox errors etc so that users can see the app
 // and agent works as expected.
 LogBox.ignoreAllLogs(true);

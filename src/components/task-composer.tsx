@@ -1,9 +1,10 @@
 import { Ionicons as BaseIonicons } from "@expo/vector-icons";
 import { addDays, addMonths, format, isSameDay, startOfMonth, startOfWeek } from "date-fns";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import { ActivityIndicator, Alert, ColorValue, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, ColorValue, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { api } from "@/src/api";
 import { useApp } from "@/src/app-context";
 import { ConfirmDeleteModal } from "./confirm-delete-modal";
 import { AnalogClockPicker } from "./analog-clock-picker";
@@ -21,6 +22,7 @@ type Props = {
   onClose: () => void;
   defaultDue?: string;
   defaultListId?: string | null;
+  defaultAssigneeIds?: string[];
 };
 
 const PRIORITY_OPTIONS: { key: "high" | "medium" | "low" | "none"; label: string; color: keyof ReturnType<typeof useTheme>["colors"] | "muted" }[] = [
@@ -47,11 +49,23 @@ const REPEAT_LABELS: { key: string; label: string }[] = [
 ];
 const QUICK_TAGS = ["Work", "Personal", "Home", "Errand", "Idea"];
 
-export function TaskComposer({ kind, onClose, defaultDue, defaultListId }: Props) {
+export function getSmartDefaultTime(dueDateStr: string | null): string {
+  if (!dueDateStr) return "09:00";
+  const now = new Date();
+  const todayStr = format(now, "yyyy-MM-dd");
+  if (dueDateStr === todayStr) {
+    if (now.getHours() < 9) return "09:00";
+    if (now.getHours() < 17) return "18:00";
+    return "21:00";
+  }
+  return "09:00";
+}
+
+export function TaskComposer({ kind, onClose, defaultDue, defaultListId, defaultAssigneeIds }: Props) {
   const styles = useStyles();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { addTask, lists, addList, assignableUsers } = useApp();
+  const { addTask, lists, addList, assignableUsers, user } = useApp();
 
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -62,7 +76,7 @@ export function TaskComposer({ kind, onClose, defaultDue, defaultListId }: Props
   const [reminders, setReminders] = useState<string[]>(["15_mins_before"]);
   const [tags, setTags] = useState<string[]>([]);
   const [listId, setListId] = useState<string | null>(defaultListId ?? null);
-  const [assigneeId, setAssigneeId] = useState<string | null>(null);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(defaultAssigneeIds ?? []);
   const [syncing, setSyncing] = useState(false);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -75,22 +89,39 @@ export function TaskComposer({ kind, onClose, defaultDue, defaultListId }: Props
   useEffect(() => {
     if (kind) {
       setTitle(""); setNotes(""); setDueDate(defaultDue ?? null); setDueTime(null);
-      setPriority("none"); setRecurrence("none"); setReminders(["15_mins_before"]); setTags([]); setAssigneeId(null);
+      setPriority("none"); setRecurrence("none"); setReminders(["15_mins_before"]); setTags([]);
+      setAssigneeIds(defaultAssigneeIds ?? []);
       setListId(defaultListId ?? lists.find((item) => item.system)?.id ?? lists[0]?.id ?? null);
     }
-  }, [kind, defaultDue, defaultListId, lists]);
+  }, [kind, defaultDue, defaultListId, defaultAssigneeIds, lists]);
+
+  const assigneeLabel = useMemo(() => {
+    if (assigneeIds.length === 0) return undefined;
+    if (assigneeIds.length === 1) {
+      if (user?.id && assigneeIds[0] === user.id) return "Me";
+      const u = assignableUsers.find((item) => item.id === assigneeIds[0]);
+      return u ? `${u.firstName || u.email.split("@")[0]}` : "1 assignee";
+    }
+    const hasMe = Boolean(user?.id && assigneeIds.includes(user.id));
+    const count = assigneeIds.length;
+    if (hasMe) {
+      return `Me +${count - 1}`;
+    }
+    const first = assignableUsers.find((item) => item.id === assigneeIds[0]);
+    const name = first ? `${first.firstName || first.email.split("@")[0]}` : "Assignee";
+    return `${name} +${count - 1}`;
+  }, [assigneeIds, assignableUsers, user?.id]);
 
   if (!kind) return null;
 
   const activeList = lists.find((item) => item.id === listId);
-  const selectedAssignee = assignableUsers.find((item) => item.id === assigneeId);
   const priorityIconColor = priority === "high" ? colors.error : priority === "medium" ? colors.warning : priority === "low" ? colors.info : colors.muted;
 
   const save = async () => {
     if (!title.trim()) { Alert.alert("Add a task title", "Give this task a short name before saving."); return; }
     setSyncing(true);
     try {
-      const effectiveTime = dueTime ?? (dueDate ? "09:00" : null);
+      const effectiveTime = dueTime ?? getSmartDefaultTime(dueDate);
       const dueIso = dueDate ? `${dueDate}T${effectiveTime}:00` : null;
       await addTask({
         title: title.trim(),
@@ -101,7 +132,8 @@ export function TaskComposer({ kind, onClose, defaultDue, defaultListId }: Props
         reminders,
         tags,
         list_id: listId,
-        assignee_id: assigneeId,
+        assignee_id: assigneeIds[0] ?? null,
+        assigneeIds,
         source: kind === "voice" ? "voice" : "quick_add",
       });
       onClose();
@@ -188,8 +220,8 @@ export function TaskComposer({ kind, onClose, defaultDue, defaultListId }: Props
                   onPress={() => setAssigneeOpen(true)}
                   styles={styles}
                   colors={colors}
-                  label={selectedAssignee ? `${selectedAssignee.firstName || selectedAssignee.email}` : undefined}
-                  highlight={Boolean(assigneeId)}
+                  label={assigneeLabel}
+                  highlight={assigneeIds.length > 0}
                 />
                 {/* <ToolbarButton
                   testID="tb-list"
@@ -232,7 +264,7 @@ export function TaskComposer({ kind, onClose, defaultDue, defaultListId }: Props
 
       <PriorityPopup visible={priorityOpen} current={priority} onSelect={(value) => setPriority(value)} onClose={() => setPriorityOpen(false)} />
       <ListPopup visible={listOpen} lists={lists} currentId={listId} onSelect={(id) => setListId(id)} onCreate={async (name) => { const created = await addList({ name, emoji: "📁" }); setListId(created.id); }} onClose={() => setListOpen(false)} />
-      <AssigneePopup visible={assigneeOpen} assignableUsers={assignableUsers} currentId={assigneeId} onSelect={(id) => setAssigneeId(id)} onClose={() => setAssigneeOpen(false)} />
+      <AssigneeModal visible={assigneeOpen} assignableUsers={assignableUsers} selectedIds={assigneeIds} onSelect={(ids) => setAssigneeIds(ids)} onClose={() => setAssigneeOpen(false)} />
       <TagPopup visible={tagsOpen} selected={tags} onSelect={(tag) => setTags((current) => current.includes(tag) ? [] : [tag])} onClose={() => setTagsOpen(false)} />
       <MorePopup visible={moreOpen} reminders={reminders} repeat={recurrence} onRemindersChange={setReminders} onRepeatChange={setRecurrence} onClose={() => setMoreOpen(false)} />
     </Modal>
@@ -299,7 +331,7 @@ function TimePickerSection({
   );
 }
 
-function DatePickerSheet({ visible, initialDate, initialTime, initialReminders, initialRepeat, onClose, onApply }: { visible: boolean; initialDate: string | null; initialTime: string | null; initialReminders: string[]; initialRepeat: string; onClose: () => void; onApply: (payload: { date: string | null; time: string | null; reminders: string[]; repeat: string }) => void }) {
+export function DatePickerSheet({ visible, initialDate, initialTime, initialReminders, initialRepeat, onClose, onApply }: { visible: boolean; initialDate: string | null; initialTime: string | null; initialReminders: string[]; initialRepeat: string; onClose: () => void; onApply: (payload: { date: string | null; time: string | null; reminders: string[]; repeat: string }) => void }) {
   const styles = useStyles();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -314,7 +346,7 @@ function DatePickerSheet({ visible, initialDate, initialTime, initialReminders, 
   useEffect(() => { if (visible) {
     setSelected(initialDate ? new Date(initialDate) : null);
     setCursor(initialDate ? new Date(initialDate) : new Date());
-    setTime(initialTime ?? "09:00"); setReminders(initialReminders); setRepeat(initialRepeat);
+    setTime(initialTime ?? getSmartDefaultTime(initialDate)); setReminders(initialReminders); setRepeat(initialRepeat);
   } }, [visible, initialDate, initialTime, initialReminders, initialRepeat]);
 
   const today = new Date();
@@ -345,9 +377,14 @@ function DatePickerSheet({ visible, initialDate, initialTime, initialReminders, 
   }, [cursor]);
 
   const pickDate = (date: Date, timeStr: string | null = null) => {
-    setSelected(date); setCursor(date); setTime(timeStr ?? time ?? "09:00");
+    const formatted = format(date, "yyyy-MM-dd");
+    setSelected(date); setCursor(date); setTime(timeStr ?? time ?? getSmartDefaultTime(formatted));
   };
-  const apply = () => onApply({ date: selected ? format(selected, "yyyy-MM-dd") : null, time: selected ? (time ?? "09:00") : null, reminders, repeat });
+  const apply = () => {
+    const formattedDate = selected ? format(selected, "yyyy-MM-dd") : null;
+    const finalTime = formattedDate ? (time ?? getSmartDefaultTime(formattedDate)) : null;
+    onApply({ date: formattedDate, time: finalTime, reminders, repeat });
+  };
   const clear = () => onApply({ date: null, time: null, reminders: [], repeat: "none" });
 
   return (
@@ -475,7 +512,7 @@ function OptionRow({ icon, label, value, onPress, testID, last, styles, colors }
 
 // -------------------------------------------------------------------- Priority popup
 
-function PriorityPopup({ visible, current, onSelect, onClose }: { visible: boolean; current: string; onSelect: (value: "high" | "medium" | "low" | "none") => void; onClose: () => void }) {
+export function PriorityPopup({ visible, current, onSelect, onClose }: { visible: boolean; current: string; onSelect: (value: "high" | "medium" | "low" | "none") => void; onClose: () => void }) {
   const styles = useStyles();
   const { colors } = useTheme();
   return (
@@ -584,7 +621,7 @@ function ListPopup({ visible, lists, currentId, onSelect, onCreate, onClose }: {
       <ConfirmDeleteModal
         visible={Boolean(deleteTarget)}
         title={deleteTarget ? `Delete "${deleteTarget.name}"?` : "Delete list?"}
-        message="Are you sure you want to delete this list? Tasks in this list will remain available in All Tasks."
+        message="Are you sure you want to delete this list? Tasks in this list will remain available in All Dates."
         loading={deletingList}
         onClose={() => setDeleteTarget(null)}
         onConfirm={async () => {
@@ -606,51 +643,267 @@ function ListPopup({ visible, lists, currentId, onSelect, onCreate, onClose }: {
   );
 }
 
-// -------------------------------------------------------------------- Assignee popup
+// -------------------------------------------------------------------- Assignee Modal (Centered dialog matching Postpone modal)
 
-function AssigneePopup({ visible, assignableUsers, currentId, onSelect, onClose }: { visible: boolean; assignableUsers: AssignableUser[]; currentId: string | null; onSelect: (id: string | null) => void; onClose: () => void }) {
+export function AssigneeModal({
+  visible,
+  assignableUsers,
+  selectedIds,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  assignableUsers: AssignableUser[];
+  selectedIds: string[];
+  onSelect: (ids: string[]) => void;
+  onClose: () => void;
+}) {
   const styles = useStyles();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { token, user } = useApp();
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [usersList, setUsersList] = useState<AssignableUser[]>(assignableUsers);
+  const [loading, setLoading] = useState(false);
+  const [localSelectedIds, setLocalSelectedIds] = useState<string[]>(selectedIds);
+
+  useEffect(() => {
+    if (visible) {
+      setSearchQuery("");
+      setUsersList(assignableUsers);
+      setLocalSelectedIds(selectedIds);
+      setLoading(true);
+      api<AssignableUser[]>("/users/assignable", {}, token ?? undefined)
+        .then((res) => {
+          if (Array.isArray(res)) setUsersList(res);
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+  }, [visible, assignableUsers, selectedIds, token]);
+
+  const toggleAssignee = (id: string) => {
+    setLocalSelectedIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      onSelect(next);
+      return next;
+    });
+  };
+
+  const isMeSelected = Boolean(user?.id && localSelectedIds.includes(user.id));
+  const toggleMe = () => {
+    if (!user?.id) return;
+    toggleAssignee(user.id);
+  };
+
+  const filteredUsers = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return usersList;
+    return usersList.filter((u) => {
+      const first = (u.firstName ?? "").toLowerCase();
+      const last = (u.lastName ?? "").toLowerCase();
+      const full = `${first} ${last}`.trim();
+      const email = (u.email ?? "").toLowerCase();
+      const roleName = (typeof u.role === "string" ? u.role : u.role?.name ?? "").toLowerCase();
+      return full.includes(q) || email.includes(q) || roleName.includes(q);
+    });
+  }, [usersList, searchQuery]);
+
+  const handleApply = () => {
+    onSelect(localSelectedIds);
+    onClose();
+  };
+
+  const handleClear = () => {
+    setLocalSelectedIds([]);
+    onSelect([]);
+  };
+
+  const myDisplayName = useMemo(() => {
+    if (!user) return "Assign to me";
+    const full = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim();
+    return full || user.name || user.email || "Assign to me";
+  }, [user]);
+
+  const myInitials = useMemo(() => {
+    if (!user) return "ME";
+    const f = user.firstName?.[0] || user.name?.[0] || "M";
+    const l = user.lastName?.[0] || "E";
+    return (f + l).toUpperCase();
+  }, [user]);
+
   return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
-      <Pressable onPress={onClose} style={styles.popupBackdrop}>
-        <Pressable onPress={() => { /* trap */ }} style={styles.popupCard} testID="assignee-popup">
-          <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <Pressable onPress={onClose} style={styles.assigneeBackdrop}>
+        <Pressable
+          onPress={() => { /* trap */ }}
+          style={[
+            styles.assigneeDialogCard,
+            {
+              maxHeight: "88%",
+              marginBottom: Math.max(insets.bottom, 16),
+            },
+          ]}
+          testID="assignee-dialog"
+        >
+          {/* Header */}
+          <View style={styles.assigneeHeader}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={styles.assigneeHeaderTitle}>Assign Task</Text>
+              {localSelectedIds.length > 0 ? (
+                <View style={styles.assigneeCountBadge}>
+                  <Text style={styles.assigneeCountBadgeText}>{localSelectedIds.length} selected</Text>
+                </View>
+              ) : null}
+            </View>
             <Pressable
-              testID="assignee-none"
-              onPress={() => {
-                onSelect(null);
-                onClose();
-              }}
-              style={({ pressed }) => [styles.popupRow, pressed && { opacity: 0.7 }]}
+              onPress={onClose}
+              hitSlop={8}
+              style={styles.assigneeCloseBtn}
+              testID="close-assignee"
             >
-              <Ionicons name="person-outline" size={18} color={colors.muted} />
-              <Text style={[styles.popupLabel, !currentId && { color: colors.brandPrimary, fontWeight: "600" }]}>Unassigned</Text>
-              {!currentId ? <Ionicons name="checkmark" size={18} color={colors.brandPrimary} /> : null}
+              <Ionicons name="close" size={20} color={colors.onSurface} />
             </Pressable>
-            {assignableUsers.map((u) => {
+          </View>
+
+          {/* Search Box */}
+          <View style={styles.assigneeSearchContainer}>
+            <View style={styles.assigneeSearchBox}>
+              <Ionicons name="search-outline" size={18} color={colors.muted} />
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search by name, email, or role..."
+                placeholderTextColor={colors.muted}
+                style={styles.assigneeSearchInput}
+                autoCorrect={false}
+                autoCapitalize="none"
+                testID="assignee-search-input"
+              />
+              {searchQuery ? (
+                <Pressable onPress={() => setSearchQuery("")} hitSlop={8} testID="clear-assignee-search">
+                  <Ionicons name="close-circle" size={18} color={colors.muted} />
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+
+          {/* User List */}
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.assigneeListContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* Top item: Instead of Unassigned -> Assign to me */}
+            {!searchQuery && user ? (
+              <Pressable
+                testID="assign-to-me"
+                onPress={toggleMe}
+                style={({ pressed }) => [
+                  styles.assignMeCard,
+                  isMeSelected && styles.assignMeCardSelected,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View style={styles.assignMeAvatar}>
+                  <Text style={styles.assignMeAvatarText}>{myInitials}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.assigneeName, isMeSelected && { color: colors.brandPrimary, fontWeight: "700" }]}>
+                    Assign to me
+                  </Text>
+                  <Text style={styles.assigneeSubtext} numberOfLines={1}>
+                    {myDisplayName} {user.email && user.email !== myDisplayName ? `(${user.email})` : ""}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={isMeSelected ? "checkbox" : "square-outline"}
+                  size={22}
+                  color={isMeSelected ? colors.brandPrimary : colors.muted}
+                />
+              </Pressable>
+            ) : null}
+
+            {loading && usersList.length === 0 ? (
+              <View style={{ paddingVertical: 24, alignItems: "center" }}>
+                <ActivityIndicator size="small" color={colors.brandPrimary} />
+              </View>
+            ) : null}
+
+            {filteredUsers.map((u) => {
               const name = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email;
               const roleName = typeof u.role === "string" ? u.role : u.role?.name;
+              const isSelected = localSelectedIds.includes(u.id);
+              const initials = (u.firstName?.[0] || "") + (u.lastName?.[0] || name[0] || "U").toUpperCase();
+
               return (
                 <Pressable
                   key={u.id}
                   testID={`assignee-${u.id}`}
-                  onPress={() => {
-                    onSelect(u.id);
-                    onClose();
-                  }}
-                  style={({ pressed }) => [styles.popupRow, pressed && { opacity: 0.7 }]}
+                  onPress={() => toggleAssignee(u.id)}
+                  style={({ pressed }) => [
+                    styles.assigneeRow,
+                    isSelected && styles.assigneeRowSelected,
+                    pressed && { opacity: 0.7 },
+                  ]}
                 >
-                  <Ionicons name="person" size={18} color={currentId === u.id ? colors.brandPrimary : colors.onSurfaceSecondary} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.popupLabel, currentId === u.id && { color: colors.brandPrimary, fontWeight: "600" }]}>{name}</Text>
-                    {u.email || roleName ? <Text style={{ fontSize: 11, color: colors.muted }}>{u.email} {roleName ? `· ${roleName}` : ""}</Text> : null}
+                  <View style={[styles.assigneeAvatar, isSelected && { backgroundColor: colors.brandPrimary }]}>
+                    <Text style={[styles.assigneeAvatarText, isSelected && { color: "#FFFFFF" }]}>
+                      {initials.slice(0, 2).toUpperCase()}
+                    </Text>
                   </View>
-                  {currentId === u.id ? <Ionicons name="checkmark" size={18} color={colors.brandPrimary} /> : null}
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.assigneeName, isSelected && { color: colors.brandPrimary, fontWeight: "700" }]}>
+                      {name}
+                    </Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                      {u.email ? <Text style={styles.assigneeSubtext}>{u.email}</Text> : null}
+                      {roleName ? (
+                        <View style={styles.roleBadge}>
+                          <Text style={styles.roleBadgeText}>{roleName}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                  <Ionicons
+                    name={isSelected ? "checkbox" : "square-outline"}
+                    size={22}
+                    color={isSelected ? colors.brandPrimary : colors.muted}
+                  />
                 </Pressable>
               );
             })}
+
+            {filteredUsers.length === 0 && !loading ? (
+              <View style={styles.assigneeEmptyContainer}>
+                <Ionicons name="search" size={28} color={colors.muted} />
+                <Text style={styles.assigneeEmptyTitle}>No assignees found</Text>
+                <Text style={styles.assigneeEmptySub}>Try searching with a different name, email, or role.</Text>
+              </View>
+            ) : null}
           </ScrollView>
+
+          {/* Footer with Clear and Done */}
+          <View style={styles.assigneeFooter}>
+            {localSelectedIds.length > 0 ? (
+              <Pressable onPress={handleClear} hitSlop={8} style={styles.clearAssigneesBtn} testID="clear-assignees">
+                <Text style={styles.clearAssigneesText}>Clear all</Text>
+              </Pressable>
+            ) : <View />}
+
+            <Pressable onPress={handleApply} style={styles.doneAssigneeBtn} testID="done-assignee">
+              <Text style={styles.doneAssigneeBtnText}>
+                {localSelectedIds.length > 0 ? `Done (${localSelectedIds.length})` : "Done"}
+              </Text>
+            </Pressable>
+          </View>
         </Pressable>
       </Pressable>
     </Modal>
@@ -814,4 +1067,223 @@ const useStyles = makeStyles((colors) => ({
   newListRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
   newListInput: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: 10, paddingHorizontal: 12, height: 38, color: colors.onSurface, fontSize: 14 },
   newListConfirm: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+
+  // Assignee modal (matches Postpone Activity modal dialog)
+  assigneeBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+  assigneeDialogCard: {
+    width: "100%",
+    maxWidth: 480,
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  assigneeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  assigneeHeaderTitle: {
+    color: colors.onSurface,
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  assigneeCloseBtn: {
+    padding: 4,
+    borderRadius: 8,
+  },
+  assigneeSearchContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  assigneeSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surfaceSecondary,
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  assigneeSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.onSurface,
+    paddingVertical: 0,
+  },
+  assigneeListContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 2,
+  },
+  assigneeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  assigneeRowSelected: {
+    backgroundColor: colors.surfaceSecondary,
+  },
+  assigneeAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  assigneeAvatarUnassigned: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  assigneeAvatarText: {
+    color: colors.onSurface,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  assigneeName: {
+    color: colors.onSurface,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  assigneeSubtext: {
+    color: colors.muted,
+    fontSize: 12,
+  },
+  roleBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  roleBadgeText: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+  assigneeEmptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 32,
+    gap: 6,
+  },
+  assigneeEmptyTitle: {
+    color: colors.onSurface,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  assigneeEmptySub: {
+    color: colors.muted,
+    fontSize: 12,
+    textAlign: "center",
+  },
+
+  assigneeCountBadge: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  assigneeCountBadgeText: {
+    color: colors.brandPrimary,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  assignMeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 6,
+  },
+  assignMeCardSelected: {
+    borderColor: colors.brandPrimary,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  assignMeAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  assignMeAvatarText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  assigneeFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.divider,
+    backgroundColor: colors.surface,
+  },
+  clearAssigneesBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  clearAssigneesText: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  doneAssigneeBtn: {
+    backgroundColor: "#0F172A",
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  doneAssigneeBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "600",
+  },
 }));

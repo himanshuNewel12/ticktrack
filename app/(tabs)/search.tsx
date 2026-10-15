@@ -2,7 +2,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { addDays, isBefore, isSameDay, startOfDay } from "date-fns";
 import { router } from "expo-router";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   ColorValue,
@@ -29,6 +29,7 @@ import {
   type TypeFilter,
 } from "@/src/components/filter-conditions-modal";
 import { TaskDetailModal } from "@/src/components/task-detail-modal";
+import { TaskEditModal } from "@/src/components/task-edit-modal";
 
 const PRIORITY_LABELS: Record<string, string> = {
   high: "High",
@@ -50,7 +51,7 @@ export default function SearchScreen() {
   const styles = useStyles();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { tasks, lists, toggleTask, deleteTask } = useApp();
+  const { tasks, lists, toggleTask, deleteTask, editTask } = useApp();
 
   const [query, setQuery] = useState("");
   const [conditions, setConditions] = useState<FilterConditions>({
@@ -62,7 +63,10 @@ export default function SearchScreen() {
 
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [filterModalTab, setFilterModalTab] = useState<FilterTab>("Type");
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const selectedTask = useMemo(() => tasks.find((t) => t.id === selectedTaskId) ?? null, [tasks, selectedTaskId]);
+  const setSelectedTask = useCallback((t: Task | null) => setSelectedTaskId(t ? t.id : null), []);
+  const [editModalTask, setEditModalTask] = useState<Task | null>(null);
   const [savedFilterToast, setSavedFilterToast] = useState(false);
 
   const trimmed = query.trim().toLowerCase();
@@ -364,10 +368,11 @@ export default function SearchScreen() {
           <NoResults query={query} styles={styles} colors={colors} />
         ) : (
           <View style={styles.resultsCard}>
-            {filteredTasks.map((task) => (
+            {filteredTasks.map((task, index) => (
               <TaskSearchResultRow
                 key={task.id}
                 task={task}
+                isLast={index === filteredTasks.length - 1}
                 query={trimmed}
                 list={task.list_id ? listMap.get(task.list_id) : undefined}
                 onPress={() => setSelectedTask(task)}
@@ -405,10 +410,19 @@ export default function SearchScreen() {
         lists={lists}
         onClose={() => setSelectedTask(null)}
         onToggle={(t) => handleToggle(t)}
+        onEdit={(t) => setEditModalTask(t)}
         onDelete={(id) => {
           void deleteTask(id);
           setSelectedTask(null);
         }}
+      />
+
+      {/* Task Edit Modal */}
+      <TaskEditModal
+        task={editModalTask}
+        visible={Boolean(editModalTask)}
+        onClose={() => setEditModalTask(null)}
+        onSave={editTask}
       />
     </View>
   );
@@ -418,6 +432,7 @@ function TaskSearchResultRow({
   task,
   query,
   list,
+  isLast,
   onPress,
   onToggle,
   styles,
@@ -426,6 +441,7 @@ function TaskSearchResultRow({
   task: Task;
   query: string;
   list?: TaskList;
+  isLast?: boolean;
   onPress: () => void;
   onToggle: () => void;
   styles: ReturnType<typeof useStyles>;
@@ -446,16 +462,36 @@ function TaskSearchResultRow({
   const titleParts = highlight(task.title, query);
   const notesParts = task.notes ? highlight(task.notes, query) : [];
 
+  const assigneeName = task.assignee
+    ? `${task.assignee.firstName ?? ""} ${task.assignee.lastName ?? ""}`.trim()
+    : task.assigneeName;
+
+  // Due date text color: red if overdue, orange if today, muted otherwise
+  const dateColor = (() => {
+    if (task.completed || !task.due_date) return null;
+    const parsed = parseTaskDate(task.due_date);
+    if (!parsed) return null;
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const tomorrowStart = startOfDay(addDays(now, 1));
+    if (parsed.getTime() < todayStart.getTime()) return "#EF4444";
+    if (parsed.getTime() < tomorrowStart.getTime()) return "#EA580C";
+    return null;
+  })();
+
   return (
     <Pressable
       testID={`search-result-${task.id}`}
       onPress={onPress}
       style={({ pressed }) => [
         styles.taskRow,
-        hasPriorityStripe && { borderLeftColor: priorityStripeColor, borderLeftWidth: 3 },
         pressed && styles.rowPressed,
       ]}
     >
+      {hasPriorityStripe ? (
+        <View style={[styles.priorityStripe, { backgroundColor: priorityStripeColor }]} />
+      ) : null}
+
       {/* Checkbox */}
       <Pressable
         testID={`task-check-${task.id}`}
@@ -467,13 +503,12 @@ function TaskSearchResultRow({
         hitSlop={8}
       >
         {task.completed ? (
-          <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+          <Ionicons name="checkmark" size={11} color="#FFFFFF" />
         ) : null}
       </Pressable>
 
-      {/* Main Info */}
+      {/* Main Content */}
       <View style={styles.taskContent}>
-        {/* Title with yellow highlight */}
         <Text
           style={[styles.taskTitle, task.completed && styles.taskTitleCompleted]}
           numberOfLines={2}
@@ -489,11 +524,11 @@ function TaskSearchResultRow({
           )}
         </Text>
 
-        {/* Notes snippet with yellow highlight */}
+        {/* Notes (if query matched or notes exist) */}
         {task.notes && task.notes.trim().length > 0 ? (
           <Text
             style={[styles.taskNotes, task.completed && styles.taskNotesCompleted]}
-            numberOfLines={2}
+            numberOfLines={1}
           >
             {notesParts.map((part, index) =>
               part.match ? (
@@ -507,29 +542,50 @@ function TaskSearchResultRow({
           </Text>
         ) : null}
 
-        {/* Meta Row: Date on left, List Badge on right */}
-        <View style={styles.taskMetaRow}>
-          {dueDisplay ? (
-            <Text
-              style={[
-                styles.taskDueDate,
-                dueDisplay.includes("Today") && styles.taskDueDateToday,
-              ]}
-            >
-              {dueDisplay}
-            </Text>
-          ) : (
-            <View />
-          )}
+        {/* Sub-row: Assignee and/or List */}
+        {(assigneeName || list) ? (
+          <View style={styles.metaRow}>
+            {assigneeName ? (
+              <View style={styles.metaItem}>
+                <Ionicons name="person-outline" size={11} color={colors.muted} />
+                <Text style={styles.metaText} numberOfLines={1}>
+                  {assigneeName}
+                </Text>
+              </View>
+            ) : null}
 
-          <View style={styles.listBadge}>
-            <Text style={styles.listBadgeText}>
-              {list?.emoji ? `${list.emoji} ` : ""}
-              {list?.name || "Inbox"}
-            </Text>
+            {assigneeName && list ? (
+              <Text style={styles.metaDot}>·</Text>
+            ) : null}
+
+            {list ? (
+              <View style={styles.metaItem}>
+                <Ionicons name="folder-outline" size={11} color="#EAB308" />
+                <Text style={styles.metaText} numberOfLines={1}>
+                  {list.emoji ? `${list.emoji} ` : ""}
+                  {list.name || "Inbox"}
+                </Text>
+              </View>
+            ) : null}
           </View>
-        </View>
+        ) : null}
       </View>
+
+      {/* Right Side: Date & Time + Alarm Icon */}
+      {!task.completed && dueDisplay ? (
+        <View style={styles.taskRightMeta}>
+          <Text
+            style={[
+              styles.taskDateText,
+              { color: dateColor || colors.brandPrimary },
+            ]}
+            numberOfLines={1}
+          >
+            {dueDisplay}
+          </Text>
+          <Ionicons name="alarm-outline" size={13} color="#9CA3AF" style={styles.alarmIcon} />
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -728,55 +784,84 @@ const useStyles = makeStyles((colors) => ({
     paddingBottom: 80,
   },
   resultsCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
+    gap: 10,
   },
   taskRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: 12,
     paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    paddingHorizontal: 14,
     backgroundColor: colors.surface,
-    borderRadius: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    position: "relative",
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  priorityStripe: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
   },
   rowPressed: {
     backgroundColor: colors.surfaceSecondary,
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    borderWidth: 1.8,
+    width: 19,
+    height: 19,
+    borderRadius: 5,
+    borderWidth: 1.5,
     borderColor: colors.borderStrong,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 2,
+    flexShrink: 0,
   },
   checkboxCompleted: {
-    backgroundColor: colors.muted,
-    borderColor: colors.muted,
+    backgroundColor: "#CBD5E1",
+    borderColor: "#CBD5E1",
   },
   taskContent: {
     flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+    gap: 2,
   },
   taskTitle: {
     color: colors.onSurface,
     fontSize: 15,
-    fontWeight: "600",
+    fontWeight: "500",
     lineHeight: 20,
   },
   taskTitleCompleted: {
-    color: colors.muted,
-    textDecorationLine: "line-through",
+    color: "#9CA3AF",
+    fontWeight: "400",
+  },
+  taskRightMeta: {
+    alignItems: "flex-end",
+    justifyContent: "center",
+    gap: 2,
+    flexShrink: 0,
+    marginLeft: 8,
+  },
+  taskDateText: {
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  alarmIcon: {
+    marginTop: 1,
   },
   taskNotes: {
     color: colors.onSurfaceSecondary,
     fontSize: 13,
     lineHeight: 18,
-    marginTop: 4,
+    marginTop: 2,
   },
   taskNotesCompleted: {
     color: colors.muted,
@@ -787,29 +872,26 @@ const useStyles = makeStyles((colors) => ({
     fontWeight: "700",
     borderRadius: 2,
   },
-  taskMetaRow: {
+  metaRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 8,
+    gap: 6,
+    flexWrap: "wrap",
+    marginTop: 1,
   },
-  taskDueDate: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  taskDueDateToday: {
-    color: colors.brandPrimary,
-    fontWeight: "600",
-  },
-  listBadge: {
+  metaItem: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 4,
   },
-  listBadgeText: {
+  metaText: {
     color: colors.muted,
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: "400",
+  },
+  metaDot: {
+    color: colors.muted,
+    fontSize: 12,
   },
   emptyContainer: {
     alignItems: "center",

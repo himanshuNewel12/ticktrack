@@ -36,21 +36,23 @@ export function formatTaskDueDateDisplay(dueStr: string | null | undefined): str
     const today = new Date();
     const tomorrow = addDays(today, 1);
 
-    let base = format(parsed, "MMM d");
-    if (isSameDay(parsed, today)) base = "Today";
-    else if (isSameDay(parsed, tomorrow)) base = "Tomorrow";
+    const hasTime = str.includes("T") && (parsed.getHours() !== 0 || parsed.getMinutes() !== 0);
+    const h = parsed.getHours();
+    const min = parsed.getMinutes();
+    const ampm = h >= 12 ? "pm" : "am";
+    const displayH = h % 12 === 0 ? 12 : h % 12;
+    const displayM = min === 0 ? ":00" : `:${String(min).padStart(2, "0")}`;
+    const timeStr = `${displayH}${displayM}${ampm}`;
 
-    if (str.includes("T")) {
-      const h = parsed.getHours();
-      const min = parsed.getMinutes();
-      if (h !== 0 || min !== 0) {
-        const ampm = h >= 12 ? "PM" : "AM";
-        const displayH = h % 12 === 0 ? 12 : h % 12;
-        const displayM = String(min).padStart(2, "0");
-        return `${base} ${displayH}:${displayM} ${ampm}`;
-      }
+    if (isSameDay(parsed, today)) {
+      return hasTime ? timeStr : "Today";
     }
-    return base;
+    if (isSameDay(parsed, tomorrow)) {
+      return hasTime ? `Tomorrow ${timeStr}` : "Tomorrow";
+    }
+
+    const dateStr = format(parsed, "d MMM");
+    return hasTime ? `${dateStr} ${timeStr}` : dateStr;
   } catch {
     return str.slice(0, 10);
   }

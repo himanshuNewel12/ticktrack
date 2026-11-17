@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; line-height: 1.6; }
+        .container { max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #eee; border-radius: 10px; }
+        .header { border-bottom: 2px solid #6366f1; padding-bottom: 10px; margin-bottom: 20px; }
+        .detail { background: #f8f8fb; border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+        .detail p { margin: 4px 0; }
+        .label { color: #666; font-size: 13px; }
+        .footer { font-size: 12px; color: #777; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px; }
+        .cta { display: inline-block; background: #6366f1; color: #fff !important; text-decoration: none; padding: 9px 16px; border-radius: 6px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Newel Planner - {{headline}}</h2>
+        </div>
+        <p>Hello {{name}},</p>
+        <p>{{intro}}</p>
+        <div class="detail">
+            <p><span class="label">Activity:</span> <strong>{{activityName}}</strong></p>
+            <p><span class="label">When:</span> {{window}}</p>
+            <p><span class="label">Created by:</span> {{creatorName}}</p>
+            {{remarksBlock}}
+        </div>
+        <p><a class="cta" href="{{link}}">Open Todo List</a></p>
+        <div class="footer">
+            <p>This activity is view-only for you — only its creator can postpone, complete or cancel it.</p>
+            <p>This is an automated notification from Newel Planner.</p>
+        </div>
+    </div>
+</body>
+</html>

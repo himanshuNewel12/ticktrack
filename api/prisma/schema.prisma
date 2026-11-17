@@ -1,0 +1,3632 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                      String                     @id @default(uuid())
+  email                   String                     @unique
+  employeeCode            String?                    @unique
+  password                String
+  firstName               String?
+  lastName                String?
+  isActive                Boolean                    @default(true)
+  roleId                  String
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+  failedAttempts          Int                        @default(0)
+  employmentStatus        EmploymentStatus           @default(ACTIVE)
+  departmentId            String?
+  baseCostPerHour         Float                      @default(0)
+  billingRatePerHour      Float                      @default(0)
+  reportingAuthorityId    String?
+  locationId              String?
+  shiftId                 String?
+  mobile                  String?
+  dateOfJoining           DateTime?
+  designation             String?
+  grade                   String?
+  avatarUrl               String?
+  expoPushToken           String?
+  passwordResetToken      String?
+  passwordResetExpires    DateTime?
+  reportedIncidents       Incident[]                 @relation("IncidentReportedBy")
+  assignedIncidents       Incident[]                 @relation("IncidentAssignedTo")
+  closedIncidents         Incident[]                 @relation("IncidentClosedBy")
+  incidentActivities      IncidentActivity[]         @relation("IncidentActivityActor")
+  incidentAttachments     IncidentAttachment[]       @relation("IncidentAttachmentUploader")
+  incidentAssignments     IncidentAssignee[]         @relation("IncidentAssignments")
+  allocations             Allocation[]
+  auditLogs               AuditLog[]
+  compOffs                CompOff[]
+  leaves                  Leave[]
+  leaveBalances           LeaveBalance[]
+  refreshTokens           RefreshToken[]
+  assignedTasks           Task[]                     @relation("TaskAssignee")
+  createdTasks            Task[]                     @relation("TaskCreatedBy")
+  assignedTickets         Ticket[]                   @relation("TicketAssignee")
+  taskAssignments         TaskAssignee[]             @relation("UserTaskAssignments")
+  ticketAssignments       TicketAssignee[]           @relation("UserTicketAssignments")
+  approvingTimesheets     Timesheet[]                @relation("TimesheetApprover")
+  timesheets              Timesheet[]
+  department              Department?                @relation(fields: [departmentId], references: [id])
+  reportingAuthority      User?                      @relation("ReportingHierarchy", fields: [reportingAuthorityId], references: [id])
+  subordinates            User[]                     @relation("ReportingHierarchy")
+  role                    Role                       @relation(fields: [roleId], references: [id])
+  skills                  UserSkill[]
+  attendance              Attendance[]
+  regularizations         AttendanceRegularization[]
+  approvedRegularizations AttendanceRegularization[] @relation("RegularizationApprover")
+  location                Location?                  @relation(fields: [locationId], references: [id])
+  shift                   Shift?                     @relation(fields: [shiftId], references: [id])
+  pmProjects              Project[]                  @relation("ProjectPM")
+  createdProjects         Project[]                  @relation("ProjectCreatedBy")
+  addedExpenses           ProjectExpense[]           @relation("ExpenseAdder")
+  generatedTmRuns         TmBillingRun[]             @relation("TmRunGenerator")
+
+  passwordResetOtps     PasswordResetOtp[]
+  reportSettingsUpdated DeliveryReportSettings[] @relation("ReportSettingsUpdatedBy")
+  reportSends           DeliveryReportSend[]     @relation("ReportSentBy")
+  deliveryUploads       DeliveryUploadBatch[]    @relation("DeliveryUploadBatchUploader")
+  errorLogs             ErrorLog[]
+  exportHistories       DeliveryExportHistory[]  @relation("TrackerExportedBy")
+
+  workflowRequests          WorkflowInstance[]            @relation("WorkflowRequester")
+  workflowActions           WorkflowActionLog[]           @relation("WorkflowActor")
+  notifications             Notification[]
+  notificationPrefs         NotificationPreference[]
+  emailLogs                 EmailLog[]                    @relation("EmailLogSubjectUser")
+  createdSpokespersons      Spokesperson[]                @relation("SpokespersonCreatedBy")
+  updatedSpokespersons      Spokesperson[]                @relation("SpokespersonUpdatedBy")
+  assetConfirmations        AssetAllocationConfirmation[] @relation("AssetConfirmationRA")
+  confirmedAssetAllocations AssetAllocationConfirmation[] @relation("AssetConfirmationConfirmedBy")
+  projectStatusCcLinks      ProjectStatusCcUser[]
+
+  // Admin Config Relations
+  updatedConfigs   AdminConfig[]
+  lockedTimesheets TimesheetLockPeriod[]
+
+  // Backdated Timesheet Approval
+  backdatedRequests    BackdatedTimesheetRequest[]
+  backdatedApprovals   BackdatedTimesheetRequest[] @relation("BackdatedApprover")
+  demands              Demand[]                    @relation("DemandRequester")
+  demandComments       DemandComment[]
+  crRequests           ChangeRequest[]             @relation("CRRequester")
+  crComments           CRComment[]
+  uploadedDocuments    Document[]
+  createdBaselines     Baseline[]                  @relation("BaselineCreator")
+  ownedRisks           Risk[]                      @relation("RiskOwner")
+  ownedIssues          Issue[]                     @relation("IssueOwner")
+  raisedIssues         Issue[]                     @relation("IssueRaiser")
+  reviewTasksAsReviewer    ReviewTask[]              @relation("ReviewTaskReviewer")
+  reviewTasksCreated       ReviewTask[]              @relation("ReviewTaskCreator")
+  reviewTaskParticipations ReviewTaskParticipant[]
+  findingsIdentified       ReviewFinding[]           @relation("FindingIdentifier")
+  findingsAssigned         ReviewFinding[]           @relation("FindingAssignee")
+  findingsVerified         ReviewFinding[]           @relation("FindingVerifier")
+  findingsClosed           ReviewFinding[]           @relation("FindingCloser")
+  findingActivities        ReviewFindingActivity[]
+  findingAttachments       ReviewFindingAttachment[]
+  ownedDeps            Dependency[]                @relation("DependencyOwner")
+  capacitySnapshots    CapacitySnapshot[]
+  trainingSessions     TrainingSession[]           @relation("SessionTrainer")
+  trainingEnrollments  TrainingEnrollment[]
+  trainingCertificates TrainingCertificate[]
+  trainingFeedbacks    TrainingFeedback[]
+
+  createdQuestionBanks QuestionBank[]
+  createdTests         Test[]
+  testAttempts         TestAttempt[]
+  testAssignments      TestAssignment[]
+
+  // QA Test Management
+  testSuitesCreated TestSuite[]     @relation("TestSuiteCreatedBy")
+  testCasesCreated  TestCase[]      @relation("TestCaseCreatedBy")
+  testCasesAssigned TestCase[]      @relation("TestCaseAssignedTo")
+  testRunsCreated   TestRun[]       @relation("TestRunCreatedBy")
+  testExecutions    TestExecution[] @relation("TestExecutedBy")
+  deployments       Deployment[]    @relation("UserDeployments")
+
+  // Assets
+  allocatedAssets      Asset[]        @relation("AssetAllocatedTo")
+  usedAssets           Asset[]        @relation("AssetCurrentlyUsedBy")
+  recordedAssetHistory AssetHistory[] @relation("AssetHistoryRecordedBy")
+
+  // Employee Maturity
+  maturityRecord           EmployeeMaturity?         @relation("EmployeeMaturityUser")
+  maturityRecordsCreated   EmployeeMaturity[]        @relation("EmployeeMaturityCreatedBy")
+  maturityRecordsUpdated   EmployeeMaturity[]        @relation("EmployeeMaturityUpdatedBy")
+  maturityHistory          EmployeeMaturityHistory[] @relation("EmployeeMaturityHistoryUser")
+  maturityHistoryCreatedBy EmployeeMaturityHistory[] @relation("EmployeeMaturityHistoryCreatedBy")
+  maturityHistoryUpdatedBy EmployeeMaturityHistory[] @relation("EmployeeMaturityHistoryUpdatedBy")
+
+  // Task Type Master
+  taskTypesCreated         TaskTypeMaster[]        @relation("TaskTypeMasterCreatedBy")
+  taskTypesUpdated         TaskTypeMaster[]        @relation("TaskTypeMasterUpdatedBy")
+  taskActivitiesCreated    TaskActivityMaster[]    @relation("TaskActivityMasterCreatedBy")
+  taskActivitiesUpdated    TaskActivityMaster[]    @relation("TaskActivityMasterUpdatedBy")
+  taskSubActivitiesCreated TaskSubActivityMaster[] @relation("TaskSubActivityMasterCreatedBy")
+  taskSubActivitiesUpdated TaskSubActivityMaster[] @relation("TaskSubActivityMasterUpdatedBy")
+
+  approvedLeaves Leave[] @relation("LeaveApprover")
+
+  // Todo List / Activities
+  createdActivities   Activity[]         @relation("ActivityCreatedBy")
+  requestedActivities Activity[]         @relation("ActivityAssignedBy")
+  activityAssignments ActivityAssignee[]
+  activityWatching    ActivityWatcher[]   @relation("ActivityWatcherUser")
+  activityEscalating  ActivityEscalator[] @relation("ActivityEscalatorUser")
+  activityActions     ActivityAction[]   @relation("ActivityActionActor")
+
+  // Recurring todo series
+  createdActivityRecurrences    ActivityRecurrence[]         @relation("ActivityRecurrenceCreatedBy")
+  activityRecurrenceAssignments ActivityRecurrenceAssignee[]
+
+  // Timesheet bulk upload
+  bulkUploadBatches   BulkUploadBatch[] @relation("BulkUploadEmployee")
+  bulkUploadsUploaded BulkUploadBatch[] @relation("BulkUploadUploader")
+
+  // WBS upload
+  taskUploadBatchesUploaded TaskUploadBatch[] @relation("TaskUploadBatchUploader")
+
+  // Task Board bulk upload
+  taskBulkUploadsUploaded TaskBulkUploadBatch[] @relation("TaskBulkUploadUploader")
+
+  // What's New
+  AppFeatureInteraction AppFeatureInteraction[]
+
+  // Outsource feedback & monthly reviews
+  outsourceFeedbacksCreated      OutsourceFeedback[]      @relation("OutsourceFeedbackCreatedBy")
+  outsourceMonthlyReviewsCreated OutsourceMonthlyReview[] @relation("OutsourceMonthlyReviewCreatedBy")
+
+  @@index([roleId])
+  @@index([departmentId])
+  @@index([email])
+}
+
+model Attendance {
+  id               String                     @id @default(uuid())
+  userId           String
+  date             DateTime                   @default(now()) @db.Timestamptz(3)
+  checkIn          DateTime?                  @db.Timestamptz(3)
+  checkInTimeZone  String?
+  checkOut         DateTime?                  @db.Timestamptz(3)
+  checkOutTimeZone String?
+  status           String                     @default("PRESENT") // PRESENT, LATE, HALF_DAY, ABSENT
+  remarks          String?
+  isWfh            Boolean                    @default(false)
+  overtimeHours    Float                      @default(0)
+  shiftId          String?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  user             User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift            Shift?                     @relation(fields: [shiftId], references: [id])
+  regularizations  AttendanceRegularization[]
+
+  @@index([userId])
+  @@index([date])
+}
+
+model Department {
+  id              String           @id @default(uuid())
+  name            String           @unique
+  description     String?
+  businessUnitId  String?
+  costCenterId    String?
+  parentId        String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  users           User[]
+  businessUnit    BusinessUnit?    @relation(fields: [businessUnitId], references: [id])
+  costCenter      CostCenter?      @relation("DeptDefaultCC", fields: [costCenterId], references: [id])
+  costCenters     CostCenter[]     @relation("CCBelongsToDept")
+  parent          Department?      @relation("DeptHierarchy", fields: [parentId], references: [id])
+  children        Department[]     @relation("DeptHierarchy")
+  demands         Demand[]
+  testAssignments TestAssignment[]
+}
+
+model Skill {
+  id               String                 @id @default(uuid())
+  name             String                 @unique
+  description      String?
+  categoryId       String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  category         SkillCategory?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  taskSkills       TaskSkill[]
+  ticketSkills     TicketSkill[]
+  users            UserSkill[]
+  freelancerSkills FreelancerSkill[]
+  trainingPrograms TrainingProgramSkill[]
+
+  @@index([categoryId])
+}
+
+model SkillCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  skills      Skill[]
+}
+
+model UserSkill {
+  userId    String
+  skillId   String
+  createdAt DateTime @default(now())
+  level     Int      @default(1)
+  updatedAt DateTime @updatedAt
+  skill     Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, skillId])
+}
+
+model Role {
+  id              String           @id @default(uuid())
+  name            String           @unique
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  permissions     RolePermission[]
+  users           User[]
+  testAssignments TestAssignment[]
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  menus       MenuPermission[]
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  dataScope    DataScope  @default(OWN)
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  role         Role       @relation(fields: [roleId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model PasswordResetOtp {
+  id         String    @id @default(uuid())
+  userId     String
+  otpHash    String
+  tokenHash  String?
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  module    String
+  entityId  String?
+  userId    String?
+  reason    String?
+  before    Json?
+  after     Json?
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([module])
+  @@index([entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Menu {
+  id          String           @id @default(uuid())
+  name        String
+  path        String           @unique
+  icon        String?
+  order       Int              @default(0)
+  isActive    Boolean          @default(true)
+  parentId    String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  parent      Menu?            @relation("MenuHierarchy", fields: [parentId], references: [id])
+  children    Menu[]           @relation("MenuHierarchy")
+  permissions MenuPermission[]
+}
+
+model MenuPermission {
+  menuId       String
+  permissionId String
+  menu         Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([menuId, permissionId])
+}
+
+model Client {
+  id                 String              @id @default(uuid())
+  clientCode         String              @unique
+  name               String
+  gstin              String?
+  pan                String?
+  email              String?
+  phone              String?
+  address            String?
+  contactPerson      String?
+  currencyId         String?
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  currency           Currency?           @relation(fields: [currencyId], references: [id])
+  projects           Project[]
+  clientPOs          ClientPO[]
+  providedAssets     Asset[]
+  spokespersons      Spokesperson[]
+  contacts           ClientContact[]
+  outsourceFeedbacks OutsourceFeedback[]
+}
+
+model ClientContact {
+  id          String   @id @default(uuid())
+  clientId    String
+  name        String
+  email       String
+  designation String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  client       Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  projectLinks ProjectClientContact[]
+
+  @@unique([clientId, email])
+  @@index([clientId])
+  @@index([isActive])
+}
+
+enum ProjectContactRole {
+  TO
+  CC
+}
+
+model ProjectClientContact {
+  id              String             @id @default(uuid())
+  projectId       String
+  clientContactId String
+  role            ProjectContactRole @default(TO)
+  createdAt       DateTime           @default(now())
+
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  clientContact ClientContact @relation(fields: [clientContactId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, clientContactId])
+  @@index([clientContactId])
+  @@index([projectId])
+}
+
+model ProjectStatusCcUser {
+  id        String             @id @default(uuid())
+  projectId String
+  userId    String
+  role      ProjectContactRole @default(CC)
+  createdAt DateTime           @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+}
+
+model Project {
+  id                 String                  @id @default(uuid())
+  name               String
+  description        String?
+  type               ProjectType
+  startDate          DateTime
+  endDate            DateTime?
+  status             ProjectStatus           @default(DRAFT)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  projectCode        String?                 @unique
+  clientId           String?
+  isInternal         Boolean                 @default(false)
+  includeInDeliveryTracker Boolean                 @default(false)
+  methodology        Methodology             @default(AGILE)
+  pmId               String?
+  budgetHours        Float?
+  budgetCost         Float?
+  revenue            Float?
+  slaType            String?
+  profitCenterId     String?
+  currencyId         String?
+  billingModel       BillingModel            @default(MILESTONE)
+  createdById        String?
+  allocations        Allocation[]
+  clientPOs          ClientPO[]
+  milestones         Milestone[]
+  tasks              Task[]
+  taskUploadBatches  TaskUploadBatch[]
+  tickets            Ticket[]
+  timesheets         Timesheet[]
+  timesheetEntries   TimesheetEntry[]
+  client             Client?                 @relation(fields: [clientId], references: [id])
+  pm                 User?                   @relation("ProjectPM", fields: [pmId], references: [id])
+  createdBy          User?                   @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  profitCenter       ProfitCenter?           @relation(fields: [profitCenterId], references: [id])
+  currency           Currency?               @relation(fields: [currencyId], references: [id])
+  demand             Demand?
+  changeRequests     ChangeRequest[]
+  incidents          Incident[]
+  sprints            Sprint[]
+  risks              Risk[]
+  issues             Issue[]
+  reviewTasks        ReviewTask[]
+  reviewFindings     ReviewFinding[]
+  dependencies       Dependency[]
+  retainerConfig     RetainerConfig?
+  expenses           ProjectExpense[]
+  tmBillingRuns      TmBillingRun[]
+  directInvoices     Invoice[]               @relation("InvoiceProject")
+  baselines          Baseline[]
+  deliveryItems      DeliveryItem[]
+  testSuites         TestSuite[]
+  testRuns           TestRun[]
+  deployments        Deployment[]
+  assets             Asset[]                 @relation("AssetProject")
+  clientContactLinks ProjectClientContact[]
+  statusCcUsers      ProjectStatusCcUser[]
+  reportSettings     DeliveryReportSettings?
+  reportSends        DeliveryReportSend[]
+  deliveryUploads    DeliveryUploadBatch[]
+  exportHistories    DeliveryExportHistory[]
+
+  @@index([createdById])
+}
+
+model Task {
+  id                  String               @id @default(uuid())
+  title               String
+  description         String?
+  status              String               @default("BACKLOG")
+  priority            String               @default("MEDIUM")
+  estimatedEffort     Float?
+  actualEffort        Float                @default(0)
+  startDate           DateTime?
+  endDate             DateTime?
+  projectId           String
+  assigneeId          String?
+  parentId            String?
+  predecessorId       String?
+  milestoneId         String?
+  sprintId            String?
+  storyPoints         Float?
+  complexity          Int                  @default(3)
+  techStack           String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  taskType            String?
+  taskTypeMasterId    String?
+  isCritical          Boolean              @default(false)
+  wbsLevel            String?
+  plannedStart        DateTime?
+  plannedEnd          DateTime?
+  plannedHours        Float?
+  // Derived effort spread over the task's working days — see daily-effort.util.ts
+  dailyEffort         Float?
+  // True when dailyEffort was typed by hand instead of being derived.
+  dailyEffortOverride Boolean              @default(false)
+  workingDays         Int?
+  progressPct         Float                @default(0)
+  crId                String?
+  phase               CRPhase?
+  uploadBatchId       String?
+  bulkUploadBatchId   String?
+  assignee            User?                @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  milestone           Milestone?           @relation(fields: [milestoneId], references: [id])
+  parent              Task?                @relation("TaskHierarchy", fields: [parentId], references: [id])
+  subTasks            Task[]               @relation("TaskHierarchy")
+  predecessor         Task?                @relation("TaskDependencies", fields: [predecessorId], references: [id])
+  successors          Task[]               @relation("TaskDependencies")
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  changeRequest       ChangeRequest?       @relation(fields: [crId], references: [id])
+  skills              TaskSkill[]
+  entries             TimesheetEntry[]
+  ticketId            String?
+  ticket              Ticket?              @relation(fields: [ticketId], references: [id])
+  sprint              Sprint?              @relation(fields: [sprintId], references: [id])
+  issues              Issue[]
+  deploymentId        String?
+  deployment          Deployment?          @relation("DeploymentTasks", fields: [deploymentId], references: [id])
+  dependenciesFrom    Dependency[]         @relation("DependencyFrom")
+  dependenciesTo      Dependency[]         @relation("DependencyTo")
+  createdById         String?
+  createdBy           User?                @relation("TaskCreatedBy", fields: [createdById], references: [id])
+  taskTypeMaster      TaskTypeMaster?      @relation(fields: [taskTypeMasterId], references: [id])
+  taskAssignees       TaskAssignee[]
+  uploadBatch         TaskUploadBatch?     @relation("TaskUploadBatchTasks", fields: [uploadBatchId], references: [id])
+  bulkUploadBatch     TaskBulkUploadBatch? @relation("TaskBulkUploadTasks", fields: [bulkUploadBatchId], references: [id])
+
+  @@index([taskTypeMasterId])
+  @@index([createdById])
+  @@index([uploadBatchId])
+  @@index([bulkUploadBatchId])
+}
+
+// Additional assignees for a Task (beyond the primary `assigneeId`).
+model TaskAssignee {
+  taskId String
+  userId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user   User   @relation("UserTaskAssignments", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, userId])
+  @@index([userId])
+}
+
+model Sprint {
+  id          String       @id @default(uuid())
+  projectId   String
+  name        String
+  goal        String?
+  startDate   DateTime
+  endDate     DateTime
+  status      SprintStatus @default(PLANNED)
+  capacity    Float?
+  velocity    Float?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks       Task[]
+  testRuns    TestRun[]
+  deployments Deployment[] @relation("SprintDeployments")
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model Baseline {
+  id           String   @id @default(uuid())
+  projectId    String
+  version      Int
+  label        String
+  snapshotData Json
+  createdById  String
+  createdAt    DateTime @default(now())
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy    User     @relation("BaselineCreator", fields: [createdById], references: [id])
+
+  @@unique([projectId, version])
+  @@index([projectId])
+}
+
+model PredictionAudit {
+  id              String   @id @default(uuid())
+  module          String
+  entityId        String
+  features        Json
+  predictedValue  Float
+  actualValue     Float?
+  userAdjustment  Float?
+  confidenceScore Float?
+  createdAt       DateTime @default(now())
+}
+
+model Ticket {
+  id              String           @id @default(uuid())
+  title           String
+  description     String?
+  status          String           @default("OPEN")
+  priority        String           @default("MEDIUM")
+  type            String           @default("BUG")
+  targetDate      DateTime?
+  isSlaBreached   Boolean          @default(false)
+  projectId       String
+  assigneeId      String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  actualEffort    Float            @default(0)
+  complexity      String           @default("MEDIUM")
+  techStack       String?
+  assignee        User?            @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  skills          TicketSkill[]
+  entries         TimesheetEntry[]
+  issues          Issue[]
+  deploymentId    String?
+  deployment      Deployment?      @relation("DeploymentTickets", fields: [deploymentId], references: [id])
+  tasks           Task[]
+  testExecutions  TestExecution[]
+  ticketAssignees TicketAssignee[]
+}
+
+// Additional assignees for a Ticket (beyond the primary `assigneeId`).
+model TicketAssignee {
+  ticketId String
+  userId   String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user     User   @relation("UserTicketAssignments", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, userId])
+  @@index([userId])
+}
+
+model Timesheet {
+  id                String                      @id @default(uuid())
+  userId            String?
+  freelancerId      String?
+  projectId         String?
+  startDate         DateTime
+  endDate           DateTime
+  status            TimesheetStatus             @default(DRAFT)
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+  approverId        String?
+  lastStatusChange  DateTime                    @default(now())
+  rejectionRemarks  String?
+  bulkUploadBatchId String?
+  approver          User?                       @relation("TimesheetApprover", fields: [approverId], references: [id])
+  project           Project?                    @relation(fields: [projectId], references: [id])
+  user              User?                       @relation(fields: [userId], references: [id])
+  freelancer        Freelancer?                 @relation(fields: [freelancerId], references: [id])
+  entries           TimesheetEntry[]
+  backdatedRequests BackdatedTimesheetRequest[]
+  bulkUploadBatch   BulkUploadBatch?            @relation("BulkUploadCreatedTimesheet", fields: [bulkUploadBatchId], references: [id])
+
+  @@unique([userId, startDate], name: "user_week")
+  @@unique([freelancerId, projectId, startDate], name: "freelancer_project_week")
+  @@index([approverId])
+  @@index([freelancerId])
+  @@index([bulkUploadBatchId])
+}
+
+model TimesheetActivityMaster {
+  id          String            @id @default(uuid())
+  taskType    TimesheetTaskType
+  activity    String
+  subActivity String
+  meaning     String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  entries     TimesheetEntry[]
+
+  @@unique([taskType, activity, subActivity])
+  @@index([taskType])
+}
+
+model TimesheetEntry {
+  id                      String                   @id @default(uuid())
+  timesheetId             String
+  projectId               String
+  date                    DateTime
+  hours                   Float
+  description             String?
+  taskType                TimesheetTaskType        @default(OBSERVATION)
+  activityMasterId        String?
+  taskSubActivityMasterId String?
+  taskId                  String?
+  ticketId                String?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  endTime                 DateTime?
+  startTime               DateTime?
+  bulkUploadBatchId       String?
+  activityMaster          TimesheetActivityMaster? @relation(fields: [activityMasterId], references: [id])
+  taskSubActivity         TaskSubActivityMaster?   @relation("TimesheetEntrySubActivity", fields: [taskSubActivityMasterId], references: [id])
+  project                 Project                  @relation(fields: [projectId], references: [id])
+  task                    Task?                    @relation(fields: [taskId], references: [id])
+  ticket                  Ticket?                  @relation(fields: [ticketId], references: [id])
+  timesheet               Timesheet                @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  bulkUploadBatch         BulkUploadBatch?         @relation("BulkUploadEntry", fields: [bulkUploadBatchId], references: [id])
+
+  @@index([timesheetId])
+  @@index([projectId])
+  @@index([activityMasterId])
+  @@index([taskSubActivityMasterId])
+  @@index([bulkUploadBatchId])
+  @@index([taskId])
+}
+
+model BackdatedTimesheetRequest {
+  id          String    @id @default(uuid())
+  timesheetId String
+  entryDate   DateTime
+  userId      String
+  reason      String
+  status      String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  approverId  String?
+  approvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  timesheet   Timesheet @relation(fields: [timesheetId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+  approver    User?     @relation("BackdatedApprover", fields: [approverId], references: [id])
+
+  @@index([timesheetId])
+  @@index([userId])
+  @@index([approverId])
+}
+
+// One row per timesheet bulk upload. Every entry it creates is tagged with its id,
+// and every weekly timesheet it newly creates points back to it — so a rollback can
+// delete ONLY the records this upload produced, never manual/pre-existing data.
+model BulkUploadBatch {
+  id            String    @id @default(uuid())
+  userId        String // employee whose timesheet was filled
+  uploadedById  String // actor who ran the upload
+  fileName      String?
+  importedCount Int       @default(0)
+  skippedCount  Int       @default(0)
+  errorCount    Int       @default(0)
+  errors        Json?
+  status        String    @default("COMPLETED") // COMPLETED | ROLLED_BACK
+  createdAt     DateTime  @default(now())
+  rolledBackAt  DateTime?
+
+  user              User             @relation("BulkUploadEmployee", fields: [userId], references: [id])
+  uploadedBy        User             @relation("BulkUploadUploader", fields: [uploadedById], references: [id])
+  entries           TimesheetEntry[] @relation("BulkUploadEntry")
+  createdTimesheets Timesheet[]      @relation("BulkUploadCreatedTimesheet")
+
+  @@index([userId])
+  @@index([uploadedById])
+}
+
+// One row per WBS upload. Every task it creates is tagged with its id, so an
+// undo can delete ONLY the tasks this upload produced — never manual/pre-existing tasks.
+model TaskUploadBatch {
+  id            String    @id @default(uuid())
+  projectId     String
+  uploadedById  String // actor who ran the upload
+  fileName      String?
+  importedCount Int       @default(0)
+  skippedCount  Int       @default(0)
+  errorCount    Int       @default(0)
+  errors        Json?
+  status        String    @default("COMPLETED") // COMPLETED | ROLLED_BACK
+  createdAt     DateTime  @default(now())
+  rolledBackAt  DateTime?
+
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedBy User    @relation("TaskUploadBatchUploader", fields: [uploadedById], references: [id])
+  tasks      Task[]  @relation("TaskUploadBatchTasks")
+
+  @@index([projectId])
+  @@index([uploadedById])
+}
+
+// One row per Task Board bulk upload (global, can span multiple projects in one
+// file). Every task it creates is tagged with its id, so an undo can delete ONLY
+// the tasks this upload produced — never manual/pre-existing tasks. Kept separate
+// from TaskUploadBatch (the per-project WBS import) since its history is global
+// rather than project-scoped, and row-level errors are persisted (see BulkUploadBatch).
+model TaskBulkUploadBatch {
+  id            String    @id @default(uuid())
+  uploadedById  String // actor who ran the upload
+  fileName      String?
+  importedCount Int       @default(0)
+  skippedCount  Int       @default(0)
+  errorCount    Int       @default(0)
+  errors        Json?
+  status        String    @default("COMPLETED") // COMPLETED | ROLLED_BACK
+  createdAt     DateTime  @default(now())
+  rolledBackAt  DateTime?
+
+  uploadedBy User   @relation("TaskBulkUploadUploader", fields: [uploadedById], references: [id])
+  tasks      Task[] @relation("TaskBulkUploadTasks")
+
+  @@index([uploadedById])
+}
+
+model Leave {
+  id                   String    @id @default(uuid())
+  userId               String
+  startDate            DateTime
+  endDate              DateTime
+  leaveTypeCode        String?
+  isHalfDay            Boolean   @default(false)
+  halfDaySession       String?
+  sandwichDays         Int       @default(0)
+  duration             Float     @default(1)
+  status               String    @default("PENDING")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  hrStatus             String    @default("PENDING")
+  pmStatus             String    @default("PENDING")
+  reason               String?
+  raStatus             String    @default("PENDING")
+  // Who actually decided — an ADMIN may approve in place of the reporting
+  // authority, so this is not derivable from the requester's RA.
+  approverId           String?
+  decidedAt            DateTime?
+  decisionRemarks      String?
+  cancelReason         String?
+  cancelRequestedAt    DateTime?
+  // Message-ID of the request mail sent to the reporting authority, so the
+  // decision mail can reply into the same conversation.
+  requestMailMessageId String?
+  requestMailSentAt    DateTime?
+  user                 User      @relation(fields: [userId], references: [id])
+  approver             User?     @relation("LeaveApprover", fields: [approverId], references: [id])
+
+  @@index([userId])
+  @@index([leaveTypeCode])
+  @@index([approverId])
+}
+
+model ClientPO {
+  id            String      @id @default(uuid())
+  poNumber      String      @unique
+  projectId     String
+  clientId      String?
+  amount        Float
+  placeOfSupply String?
+  status        String      @default("ACTIVE")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  project       Project     @relation(fields: [projectId], references: [id])
+  client        Client?     @relation(fields: [clientId], references: [id])
+  invoices      Invoice[]
+  milestones    Milestone[]
+}
+
+model Milestone {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  amount      Float
+  sacCode     String?   @default("998311")
+  completion  Float     @default(0)
+  status      String    @default("PENDING")
+  projectId   String
+  clientPoId  String?
+  dueDate     DateTime?
+  achievedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  invoices    Invoice[]
+  clientPo    ClientPO? @relation(fields: [clientPoId], references: [id])
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks       Task[]
+}
+
+model Invoice {
+  id              String        @id @default(uuid())
+  invoiceNo       String        @unique
+  invoiceType     String        @default("MILESTONE") // MILESTONE, TM, RETAINER
+  clientPoId      String?
+  milestoneId     String?
+  projectId       String?
+  metadata        Json? // T&M line items: [{resourceName, hours, rate, amount}]
+  subTotal        Float
+  cgst            Float         @default(0)
+  sgst            Float         @default(0)
+  igst            Float         @default(0)
+  tax             Float
+  total           Float
+  status          String        @default("DRAFT")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  cfoApproved     Boolean       @default(false)
+  financeApproved Boolean       @default(false)
+  clientPo        ClientPO?     @relation(fields: [clientPoId], references: [id])
+  milestone       Milestone?    @relation(fields: [milestoneId], references: [id])
+  project         Project?      @relation("InvoiceProject", fields: [projectId], references: [id])
+  payments        Payment[]
+  tmBillingRun    TmBillingRun?
+
+  @@index([clientPoId])
+  @@index([milestoneId])
+  @@index([projectId])
+}
+
+model Payment {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  amount      Float
+  paymentDate DateTime
+  method      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  status      String   @default("SUCCESS")
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+}
+
+model RetainerConfig {
+  id            String   @id @default(uuid())
+  projectId     String   @unique
+  monthlyAmount Float
+  billingDay    Int      @default(1)
+  currency      String   @default("INR")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  project       Project  @relation(fields: [projectId], references: [id])
+}
+
+model ProjectExpense {
+  id          String   @id @default(uuid())
+  projectId   String
+  description String
+  amount      Float
+  category    String // TRAVEL, LICENSE, INFRASTRUCTURE, VENDOR, OTHER
+  expenseDate DateTime
+  vendorId    String?
+  invoiceRef  String?
+  addedById   String
+  createdAt   DateTime @default(now())
+  project     Project  @relation(fields: [projectId], references: [id])
+  vendor      Vendor?  @relation(fields: [vendorId], references: [id])
+  addedBy     User     @relation("ExpenseAdder", fields: [addedById], references: [id])
+
+  @@index([projectId])
+}
+
+model TmBillingRun {
+  id            String   @id @default(uuid())
+  projectId     String
+  periodStart   DateTime
+  periodEnd     DateTime
+  totalHours    Float
+  totalAmount   Float
+  status        String   @default("DRAFT") // DRAFT, INVOICED
+  invoiceId     String?  @unique
+  generatedById String
+  generatedAt   DateTime @default(now())
+  project       Project  @relation(fields: [projectId], references: [id])
+  generatedBy   User     @relation("TmRunGenerator", fields: [generatedById], references: [id])
+  invoice       Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@index([projectId])
+}
+
+model LeaveBalance {
+  id              String    @id @default(uuid())
+  userId          String
+  leaveTypeCode   String
+  earnedBalance   Float     @default(0)
+  usedBalance     Float     @default(0)
+  carryForward    Float     @default(0)
+  expiryDate      DateTime?
+  financialYearId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, leaveTypeCode])
+}
+
+// ── ADMIN CONFIGURATION ───────────────────────────────────────────────────────
+
+model AdminConfig {
+  key         String   @id // e.g. "timesheet.max_daily_hours"
+  value       String // JSON-serializable string
+  label       String? // human-readable label
+  group       String? // "TIMESHEET", "ALLOCATION", "LEAVE"
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+  updatedBy   User?    @relation(fields: [updatedById], references: [id])
+}
+
+model NumberSeries {
+  module    String   @id // "PROJECT","EMPLOYEE","FREELANCER","VENDOR","CLIENT","INVOICE","DEMAND","CR"
+  prefix    String // "PRJ","EMP","FRL","VND","CLT","INV","DEM","CR"
+  lastSeq   Int      @default(0)
+  padding   Int      @default(4)
+  separator String   @default("-")
+  updatedAt DateTime @updatedAt
+}
+
+model TimesheetLockPeriod {
+  id         String   @id @default(uuid())
+  month      Int // 1-12
+  year       Int
+  isLocked   Boolean  @default(true)
+  lockedById String?
+  lockedAt   DateTime @default(now())
+  lockedBy   User?    @relation(fields: [lockedById], references: [id])
+
+  @@unique([month, year])
+}
+
+model FinancialYear {
+  id         String   @id @default(uuid())
+  label      String // "FY 2025-26"
+  startMonth Int // 4 (April in India)
+  startYear  Int // 2025
+  endMonth   Int // 3 (March)
+  endYear    Int // 2026
+  isCurrent  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model CompOff {
+  id          String   @id @default(uuid())
+  userId      String
+  date        DateTime
+  hoursWorked Float
+  extraHours  Float
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([date])
+}
+
+model Allocation {
+  id           String       @id @default(uuid())
+  userId       String?
+  freelancerId String?
+  resourceType ResourceType @default(EMPLOYEE)
+  projectId    String
+  projectRole  String?
+  startDate    DateTime
+  endDate      DateTime
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  project      Project      @relation(fields: [projectId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
+  freelancer   Freelancer?  @relation(fields: [freelancerId], references: [id])
+
+  @@unique([userId, projectId, startDate])
+  @@unique([freelancerId, projectId, startDate], name: "freelancer_project_allocation")
+  @@index([userId])
+  @@index([projectId])
+  @@index([freelancerId])
+}
+
+model TaskSkill {
+  taskId  String
+  skillId String
+  skill   Skill  @relation(fields: [skillId], references: [id])
+  task    Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, skillId])
+  @@index([taskId])
+  @@index([skillId])
+}
+
+model PublicHoliday {
+  id          String    @id @default(uuid())
+  name        String
+  date        DateTime
+  isGlobal    Boolean   @default(true)
+  locationId  String?
+  isOptional  Boolean   @default(false)
+  type        String?   @default("NATIONAL")
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  location    Location? @relation(fields: [locationId], references: [id])
+
+  @@unique([date, locationId])
+}
+
+model TicketSkill {
+  ticketId String
+  skillId  String
+  skill    Skill  @relation(fields: [skillId], references: [id])
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, skillId])
+  @@index([ticketId])
+  @@index([skillId])
+}
+
+// ── ORG MASTERS ────────────────────────────────────────────────────────────────
+
+model Currency {
+  id           String       @id @default(uuid())
+  code         String       @unique // "INR", "USD"
+  name         String
+  symbol       String // "₹", "$"
+  exchangeRate Float        @default(1.0)
+  isBase       Boolean      @default(false)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  companies    Company[]
+  projects     Project[]
+  clients      Client[]
+  freelancers  Freelancer[]
+}
+
+model Company {
+  id            String         @id @default(uuid())
+  name          String         @unique
+  gstin         String?
+  pan           String?
+  address       String?
+  currencyId    String?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  currency      Currency?      @relation(fields: [currencyId], references: [id])
+  businessUnits BusinessUnit[]
+  locations     Location[]
+}
+
+model BusinessUnit {
+  id          String       @id @default(uuid())
+  name        String
+  code        String       @unique
+  companyId   String
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  company     Company      @relation(fields: [companyId], references: [id])
+  departments Department[]
+}
+
+model Location {
+  id        String          @id @default(uuid())
+  name      String
+  city      String?
+  country   String          @default("India")
+  timezone  String          @default("Asia/Kolkata")
+  companyId String?
+  isActive  Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  company   Company?        @relation(fields: [companyId], references: [id])
+  users     User[]
+  shifts    Shift[]
+  holidays  PublicHoliday[]
+  assets    Asset[]
+}
+
+model Shift {
+  id           String       @id @default(uuid())
+  name         String
+  startTime    String // "09:00"
+  endTime      String // "18:00"
+  breakMinutes Int          @default(60)
+  weekdays     String[] // ["MON","TUE","WED","THU","FRI"]
+  locationId   String?
+  isDefault    Boolean      @default(false)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  location     Location?    @relation(fields: [locationId], references: [id])
+  users        User[]
+  attendance   Attendance[]
+}
+
+model CostCenter {
+  id           String       @id @default(uuid())
+  code         String       @unique
+  name         String
+  departmentId String?
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  department   Department?  @relation("CCBelongsToDept", fields: [departmentId], references: [id])
+  deptDefaults Department[] @relation("DeptDefaultCC")
+}
+
+model ProfitCenter {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  name      String
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  projects  Project[]
+}
+
+model LeaveTypeMaster {
+  id                    String   @id @default(uuid())
+  code                  String   @unique // "CL","SL","EL","LOP","CO"
+  name                  String
+  isPaid                Boolean  @default(true)
+  allowHalfDay          Boolean  @default(false)
+  carryForwardMax       Int      @default(0)
+  expiryMonths          Int?
+  requiresApproval      Boolean  @default(true)
+  requiresSandwichCheck Boolean  @default(false)
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model PriorityMaster {
+  id        String   @id @default(uuid())
+  name      String   @unique // "CRITICAL","HIGH","MEDIUM","LOW"
+  color     String? // "#FF0000"
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// ── ENUMS ──────────────────────────────────────────────────────────────────────
+
+enum DataScope {
+  OWN
+  TEAM
+  DEPARTMENT
+  PROJECT
+  ALL
+}
+
+enum BillingModel {
+  MILESTONE
+  TM
+  RETAINER
+  FIXED
+}
+
+enum SprintStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum EmploymentStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  RESIGNED
+  TERMINATED
+}
+
+enum RegularizationReason {
+  FORGOT_PUNCH
+  SYSTEM_ERROR
+  FIELD_WORK
+  CLIENT_VISIT
+  TRAINING
+  OTHER
+}
+
+enum RegularizationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model AttendanceRegularization {
+  id                   String               @id @default(uuid())
+  userId               String
+  attendanceId         String?
+  date                 DateTime             @db.Timestamptz(3)
+  requestedIn          DateTime?            @db.Timestamptz(3)
+  requestedInTimeZone  String?
+  requestedOut         DateTime?            @db.Timestamptz(3)
+  requestedOutTimeZone String?
+  reason               RegularizationReason
+  remarks              String?
+  status               RegularizationStatus @default(PENDING)
+  approverId           String?
+  approvedAt           DateTime?
+  // Approver's note on the decision — distinct from `remarks`, which is the
+  // requester's justification. Surfaced in the decision email.
+  decisionRemarks      String?
+  // Message-ID of the request mail sent to the reporting authority. The decision
+  // mail references it so both land in one conversation.
+  requestMailMessageId String?
+  requestMailSentAt    DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  user                 User                 @relation(fields: [userId], references: [id])
+  approver             User?                @relation("RegularizationApprover", fields: [approverId], references: [id])
+  attendance           Attendance?          @relation(fields: [attendanceId], references: [id])
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+  @@index([status])
+}
+
+enum Methodology {
+  AGILE
+  WATERFALL
+  HYBRID
+}
+
+enum ProjectStatus {
+  DRAFT
+  APPROVED
+  ACTIVE
+  ON_HOLD
+  CLOSED
+  ARCHIVED
+  CANCELLED
+  INACTIVE
+}
+
+enum ProjectType {
+  DEVELOPMENT
+  MAINTENANCE
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  WIP
+  QA
+  COMPLETED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  VOID
+}
+
+enum TimesheetTaskType {
+  OBSERVATION
+  CHANGE_REQUEST
+}
+
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  RA_APPROVED
+  PM_APPROVED
+  REJECTED
+}
+
+enum RateType {
+  HOURLY
+  DAILY
+  FIXED
+}
+
+enum NdaStatus {
+  PENDING
+  SIGNED
+  EXPIRED
+}
+
+enum FreelancerStatus {
+  ACTIVE
+  INACTIVE
+  CONTRACT_EXPIRED
+  BLACKLISTED
+}
+
+enum ResourceType {
+  EMPLOYEE
+  FREELANCER
+  SHARED
+  BACKUP
+}
+
+enum VendorCategory {
+  STAFFING
+  CONSULTING
+  TECHNOLOGY
+  INFRASTRUCTURE
+  OTHER
+}
+
+enum VendorStatus {
+  ACTIVE
+  INACTIVE
+  BLACKLISTED
+}
+
+// ── VENDOR MANAGEMENT ──────────────────────────────────────────────────────────
+
+model Vendor {
+  id             String           @id @default(uuid())
+  vendorCode     String           @unique
+  vendorName     String
+  category       VendorCategory   @default(CONSULTING)
+  gstin          String?
+  pan            String?
+  address        String?
+  agreementStart DateTime?
+  agreementEnd   DateTime?
+  rateCards      Json?
+  // format: [{ role: "Developer", level: "Senior", rate: 2500, currency: "INR" }]
+  status         VendorStatus     @default(ACTIVE)
+  isActive       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  contacts       VendorContact[]
+  freelancers    Freelancer[]
+  expenses       ProjectExpense[]
+}
+
+model VendorContact {
+  id          String   @id @default(uuid())
+  vendorId    String
+  name        String
+  email       String
+  phone       String?
+  designation String?
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  vendor      Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+}
+
+// ── WORKFLOW ENGINE ───────────────────────────────────────────────────────────
+
+enum WorkflowAction {
+  APPROVE
+  REJECT
+  SEND_BACK
+  DELEGATE
+  ESCALATE
+}
+
+enum WorkflowStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ApproverType {
+  ROLE
+  USER
+  REPORTING_AUTHORITY
+}
+
+model WorkflowTemplate {
+  id        String             @id @default(uuid())
+  module    String // LEAVE, TIMESHEET, DEMAND, PROJECT, CR, ALLOCATION_OVERRIDE
+  name      String
+  isActive  Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  steps     WorkflowStep[]
+  instances WorkflowInstance[]
+}
+
+model WorkflowStep {
+  id                 String           @id @default(uuid())
+  templateId         String
+  stepOrder          Int
+  stepName           String
+  approverType       ApproverType     @default(ROLE)
+  approverRoleId     String? // if type = ROLE
+  approverUserId     String? // if type = USER
+  escalateAfterHours Int? // null = no auto-escalation
+  allowDelegate      Boolean          @default(true)
+  template           WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, stepOrder])
+}
+
+model WorkflowInstance {
+  id          String              @id @default(uuid())
+  templateId  String
+  entityType  String // LEAVE, TIMESHEET, DEMAND, PROJECT, CR
+  entityId    String
+  currentStep Int                 @default(1)
+  status      WorkflowStatus      @default(PENDING)
+  requesterId String
+  remarks     String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  template    WorkflowTemplate    @relation(fields: [templateId], references: [id])
+  requester   User                @relation("WorkflowRequester", fields: [requesterId], references: [id])
+  actions     WorkflowActionLog[]
+}
+
+model WorkflowActionLog {
+  id          String           @id @default(uuid())
+  instanceId  String
+  stepOrder   Int
+  actorId     String
+  action      WorkflowAction
+  remarks     String?
+  delegatedTo String?
+  takenAt     DateTime         @default(now())
+  instance    WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  actor       User             @relation("WorkflowActor", fields: [actorId], references: [id])
+}
+
+model Freelancer {
+  id             String            @id @default(uuid())
+  freelancerCode String            @unique
+  fullName       String
+  email          String            @unique
+  mobile         String?
+  vendorId       String?
+  experience     Int?
+  country        String?
+  location       String?
+  contractStart  DateTime
+  contractEnd    DateTime
+  rateType       RateType          @default(HOURLY)
+  costPerHour    Float
+  billingRate    Float
+  currencyId     String?
+  ndaStatus      NdaStatus         @default(PENDING)
+  agreementUrl   String?
+  status         FreelancerStatus  @default(ACTIVE)
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  vendor         Vendor?           @relation(fields: [vendorId], references: [id])
+  currency       Currency?         @relation(fields: [currencyId], references: [id])
+  skills         FreelancerSkill[]
+  allocations    Allocation[]
+  timesheets     Timesheet[]
+
+  @@index([vendorId])
+  @@index([status])
+}
+
+model FreelancerSkill {
+  freelancerId String
+  skillId      String
+  level        Int        @default(1)
+  freelancer   Freelancer @relation(fields: [freelancerId], references: [id], onDelete: Cascade)
+  skill        Skill      @relation(fields: [skillId], references: [id])
+
+  @@id([freelancerId, skillId])
+}
+
+// -- NOTIFICATIONS -------------------------------------------------------------
+enum NotificationType {
+  TIMESHEET_REMINDER
+  APPROVAL_PENDING
+  APPROVED
+  REJECTED
+  CONTRACT_EXPIRY
+  MILESTONE_OVERDUE
+  LEAVE_BALANCE_LOW
+  BUDGET_EXCEEDED
+  ALLOCATION_CONFLICT
+  ISSUE_ESCALATED
+  TRAINING_COMPLETED
+  TRAINING_CERTIFICATE_ISSUED
+  PROJECT_DORMANT
+  ACTIVITY_ASSIGNED
+  ACTIVITY_POSTPONED
+  ACTIVITY_COMPLETED
+  ACTIVITY_CANCELLED
+  ACTIVITY_SERIES_ASSIGNED
+  ACTIVITY_SERIES_CANCELLED
+  ACTIVITY_REMARK_ADDED
+  ACTIVITY_ESCALATED
+  TASK_ASSIGNED
+  GENERAL
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  isRead    Boolean          @default(false)
+  metadata  Json? // { entityType, entityId, link }
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+model NotificationPreference {
+  id     String           @id @default(uuid())
+  userId String
+  type   NotificationType
+  inApp  Boolean          @default(true)
+  email  Boolean          @default(true)
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+}
+
+// ── DEMAND / INTAKE ──────────────────────────────────────────────────────────
+
+enum DemandStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  CONVERTED
+}
+
+enum DemandPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Demand {
+  id                 String          @id @default(uuid())
+  demandCode         String          @unique
+  title              String
+  description        String?
+  requesterId        String
+  departmentId       String?
+  estimatedTimeline  DateTime?
+  estimatedBudget    Float?
+  priority           DemandPriority  @default(MEDIUM)
+  attachmentUrl      String?
+  status             DemandStatus    @default(DRAFT)
+  reviewerRemarks    String?
+  convertedProjectId String?         @unique
+  workflowInstanceId String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  requester          User            @relation("DemandRequester", fields: [requesterId], references: [id])
+  department         Department?     @relation(fields: [departmentId], references: [id])
+  convertedProject   Project?        @relation(fields: [convertedProjectId], references: [id])
+  comments           DemandComment[]
+}
+
+model DemandComment {
+  id        String   @id @default(uuid())
+  demandId  String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+  demand    Demand   @relation(fields: [demandId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id])
+}
+
+// -- CHANGE REQUESTS -----------------------------------------------------------
+
+enum CRType {
+  SCOPE
+  BUDGET
+  TIMELINE
+  RESOURCE
+  COMBINED
+}
+
+enum CRStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  IN_PROGRESS
+  CLOSED
+  DEFERRED
+  ON_HOLD
+}
+
+enum CRPhase {
+  REQUIREMENT
+  DESIGN
+  DEVELOPMENT
+  TESTING
+  UAT
+  DEPLOYMENT
+}
+
+model ChangeRequest {
+  id                 String      @id @default(uuid())
+  crCode             String      @unique
+  projectId          String
+  title              String
+  type               CRType
+  description        String?
+  impactedScope      String? // free text describing scope changes
+  budgetDelta        Float? // +ve = increase, -ve = decrease
+  timelineDeltaDays  Int? // number of days to extend endDate
+  resourceChanges    Json? // [{ action: "ADD"|"REMOVE"|"CHANGE", resourceId, role, percentage }]
+  status             CRStatus    @default(DRAFT)
+  requesterId        String
+  workflowInstanceId String?
+  approvedAt         DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  project            Project     @relation(fields: [projectId], references: [id])
+  requester          User        @relation("CRRequester", fields: [requesterId], references: [id])
+  comments           CRComment[]
+  tasks              Task[]
+}
+
+model CRComment {
+  id        String        @id @default(uuid())
+  crId      String
+  authorId  String
+  body      String
+  createdAt DateTime      @default(now())
+  cr        ChangeRequest @relation(fields: [crId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id])
+}
+
+enum DocType {
+  BRD
+  FRD
+  SOW
+  CONTRACT
+  DESIGN
+  TEST_SIGNOFF
+  INVOICE
+  NDA
+  AGREEMENT
+  PROPOSAL
+  OTHER
+}
+
+model Document {
+  id           String   @id @default(uuid())
+  entityType   String // PROJECT, DEMAND, CR, VENDOR, FREELANCER, CLIENT
+  entityId     String
+  docType      DocType
+  name         String
+  originalName String
+  fileUrl      String
+  mimeType     String
+  sizeBytes    Int
+  version      Int      @default(1)
+  isLatest     Boolean  @default(true)
+  description  String?
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([entityType, entityId, docType, isLatest])
+}
+
+// ── RISK REGISTER ─────────────────────────────────────────────────────────────
+
+enum RiskProbability {
+  LOW
+  MEDIUM
+  HIGH
+  VERY_HIGH
+}
+
+enum RiskImpact {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskStatus {
+  OPEN
+  MITIGATING
+  MITIGATED
+  ACCEPTED
+  CLOSED
+}
+
+model Risk {
+  id          String          @id @default(uuid())
+  projectId   String
+  title       String
+  description String?
+  probability RiskProbability
+  impact      RiskImpact
+  riskScore   Int
+  mitigation  String?
+  contingency String?
+  ownerId     String
+  status      RiskStatus      @default(OPEN)
+  dueDate     DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  owner       User            @relation("RiskOwner", fields: [ownerId], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+}
+
+// ── ISSUE REGISTER ────────────────────────────────────────────────────────────
+
+enum IssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  ESCALATED
+  RESOLVED
+  CLOSED
+}
+
+model Issue {
+  id          String        @id @default(uuid())
+  projectId   String
+  title       String
+  description String?
+  severity    IssueSeverity @default(MEDIUM)
+  status      IssueStatus   @default(OPEN)
+  ownerId     String
+  raisedById  String
+  eta         DateTime?
+  resolvedAt  DateTime?
+  escalatedAt DateTime?
+  resolution  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  owner       User          @relation("IssueOwner", fields: [ownerId], references: [id])
+  raisedBy    User          @relation("IssueRaiser", fields: [raisedById], references: [id])
+  taskId      String?
+  task        Task?         @relation(fields: [taskId], references: [id])
+  ticketId    String?
+  ticket      Ticket?       @relation(fields: [ticketId], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+}
+
+// ── DEPENDENCY REGISTER ───────────────────────────────────────────────────────
+
+enum DependencyType {
+  INTERNAL
+  EXTERNAL
+}
+
+enum DependencyStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  BLOCKED
+}
+
+model Dependency {
+  id          String           @id @default(uuid())
+  projectId   String
+  title       String
+  description String?
+  type        DependencyType   @default(INTERNAL)
+  fromTaskId  String?
+  toTaskId    String?
+  externalRef String?
+  ownerId     String
+  status      DependencyStatus @default(OPEN)
+  dueDate     DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  owner       User             @relation("DependencyOwner", fields: [ownerId], references: [id])
+  fromTask    Task?            @relation("DependencyFrom", fields: [fromTaskId], references: [id])
+  toTask      Task?            @relation("DependencyTo", fields: [toTaskId], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+}
+
+// ── CAPACITY PLANNING ─────────────────────────────────────────────────────────
+
+model CapacitySnapshot {
+  id             String   @id @default(uuid())
+  userId         String
+  month          Int // 1-12
+  year           Int
+  workingDays    Int
+  dailyHours     Float    @default(8)
+  availableHrs   Float
+  allocatedHrs   Float    @default(0)
+  billableHrs    Float    @default(0)
+  utilizationPct Float    @default(0)
+  benchDays      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, month, year])
+  @@index([userId])
+  @@index([month, year])
+}
+
+// ── TRAINING MODULE ───────────────────────────────────────────────────────────
+
+enum TrainingType {
+  INTERNAL
+  EXTERNAL
+  ONLINE
+  CERTIFICATION
+}
+
+enum TrainingMode {
+  ONLINE
+  OFFLINE
+  HYBRID
+}
+
+enum SessionStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum EnrollmentStatus {
+  ENROLLED
+  WAITLISTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model TrainingCategory {
+  id          String            @id @default(uuid())
+  name        String            @unique
+  description String?
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  programs    TrainingProgram[]
+}
+
+model TrainingProgram {
+  id           String                 @id @default(uuid())
+  name         String
+  description  String?
+  type         TrainingType           @default(INTERNAL)
+  categoryId   String?
+  durationHrs  Float
+  isActive     Boolean                @default(true)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  category     TrainingCategory?      @relation(fields: [categoryId], references: [id])
+  skills       TrainingProgramSkill[]
+  sessions     TrainingSession[]
+  certificates TrainingCertificate[]
+
+  @@index([categoryId])
+  @@index([type])
+}
+
+model TrainingProgramSkill {
+  programId String
+  skillId   String
+  program   TrainingProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  skill     Skill           @relation(fields: [skillId], references: [id])
+
+  @@id([programId, skillId])
+  @@index([skillId])
+}
+
+model TrainingSession {
+  id           String                @id @default(uuid())
+  programId    String
+  title        String?
+  startDate    DateTime
+  endDate      DateTime
+  mode         TrainingMode          @default(OFFLINE)
+  venue        String?
+  meetingUrl   String?
+  maxCapacity  Int?
+  trainerId    String?
+  status       SessionStatus         @default(SCHEDULED)
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  program      TrainingProgram       @relation(fields: [programId], references: [id], onDelete: Cascade)
+  trainer      User?                 @relation("SessionTrainer", fields: [trainerId], references: [id])
+  enrollments  TrainingEnrollment[]
+  certificates TrainingCertificate[]
+  feedbacks    TrainingFeedback[]
+
+  @@index([programId])
+  @@index([startDate])
+  @@index([status])
+}
+
+model TrainingEnrollment {
+  id          String               @id @default(uuid())
+  sessionId   String
+  userId      String
+  status      EnrollmentStatus     @default(ENROLLED)
+  enrolledAt  DateTime             @default(now())
+  completedAt DateTime?
+  remarks     String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  session     TrainingSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user        User                 @relation(fields: [userId], references: [id])
+  certificate TrainingCertificate?
+  feedback    TrainingFeedback?
+
+  @@unique([sessionId, userId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([status])
+}
+
+model TrainingCertificate {
+  id            String             @id @default(uuid())
+  enrollmentId  String             @unique
+  userId        String
+  programId     String
+  sessionId     String
+  certificateNo String             @unique
+  issuedAt      DateTime           @default(now())
+  expiresAt     DateTime?
+  enrollment    TrainingEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  user          User               @relation(fields: [userId], references: [id])
+  program       TrainingProgram    @relation(fields: [programId], references: [id])
+  session       TrainingSession    @relation(fields: [sessionId], references: [id])
+
+  @@index([userId])
+  @@index([sessionId])
+}
+
+model TrainingFeedback {
+  id            String             @id @default(uuid())
+  enrollmentId  String             @unique
+  userId        String
+  sessionId     String
+  rating        Int
+  trainerRating Int?
+  contentRating Int?
+  comments      String?
+  createdAt     DateTime           @default(now())
+  enrollment    TrainingEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  user          User               @relation(fields: [userId], references: [id])
+  session       TrainingSession    @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId])
+  @@index([userId])
+}
+
+// ─── TEST MODULE ────────────────────────────────────────────────────────────
+
+enum QuestionType {
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum TestStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+}
+
+enum AssignmentTarget {
+  USER
+  DEPARTMENT
+  ROLE
+}
+
+model QuestionBank {
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  createdById String
+  createdBy   User       @relation(fields: [createdById], references: [id])
+  questions   Question[]
+  tests       Test[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([createdById])
+}
+
+model Question {
+  id             String          @id @default(uuid())
+  bankId         String
+  bank           QuestionBank    @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  text           String
+  type           QuestionType    @default(SINGLE_CHOICE)
+  options        Json // [{ id: string, text: string }]
+  correctOptions Json // string[] of option ids
+  explanation    String?
+  difficulty     Difficulty      @default(MEDIUM)
+  marks          Int             @default(1)
+  tags           String[]
+  testQuestions  TestQuestion[]
+  answers        AttemptAnswer[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([bankId])
+  @@index([difficulty])
+}
+
+model Test {
+  id           String           @id @default(uuid())
+  title        String
+  description  String?
+  bankId       String?
+  bank         QuestionBank?    @relation(fields: [bankId], references: [id])
+  duration     Int // minutes
+  totalMarks   Int
+  passingMarks Int
+  instructions String?
+  status       TestStatus       @default(DRAFT)
+  createdById  String
+  createdBy    User             @relation(fields: [createdById], references: [id])
+  questions    TestQuestion[]
+  assignments  TestAssignment[]
+  attempts     TestAttempt[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([status])
+  @@index([createdById])
+}
+
+model TestQuestion {
+  id         String   @id @default(uuid())
+  testId     String
+  test       Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  order      Int
+  marks      Int? // overrides question.marks if set
+
+  @@unique([testId, questionId])
+  @@index([testId])
+}
+
+model TestAssignment {
+  id           String           @id @default(uuid())
+  testId       String
+  test         Test             @relation(fields: [testId], references: [id], onDelete: Cascade)
+  target       AssignmentTarget
+  userId       String?
+  user         User?            @relation(fields: [userId], references: [id])
+  departmentId String?
+  department   Department?      @relation(fields: [departmentId], references: [id])
+  roleId       String?
+  role         Role?            @relation(fields: [roleId], references: [id])
+  dueDate      DateTime?
+  createdAt    DateTime         @default(now())
+
+  @@index([testId])
+  @@index([userId])
+  @@index([departmentId])
+  @@index([roleId])
+}
+
+model TestAttempt {
+  id          String          @id @default(uuid())
+  testId      String
+  test        Test            @relation(fields: [testId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  startedAt   DateTime        @default(now())
+  submittedAt DateTime?
+  status      AttemptStatus   @default(IN_PROGRESS)
+  score       Float?
+  percentage  Float?
+  passed      Boolean?
+  answers     AttemptAnswer[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([testId, userId])
+  @@index([userId])
+  @@index([status])
+}
+
+model AttemptAnswer {
+  id              String      @id @default(uuid())
+  attemptId       String
+  attempt         TestAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId      String
+  question        Question    @relation(fields: [questionId], references: [id])
+  selectedOptions Json // string[] of option ids
+  isCorrect       Boolean?
+  marksObtained   Float?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+}
+
+// ── DELIVERY TRACKER ────────────────────────────────────────────────────────
+
+enum DeliveryStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+model DeliveryItem {
+  id             String                @id @default(uuid())
+  projectId      String
+  project        Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  srNo           Int
+  title          String
+  owners         String?
+  plannedStart   DateTime?
+  plannedEnd     DateTime?
+  actualStart    DateTime?
+  actualEnd      DateTime?
+  uatReleaseDate DateTime?
+  stageId        String?
+  stage          DeliveryStageMaster?  @relation(fields: [stageId], references: [id])
+  status         DeliveryStatus        @default(OPEN)
+  // Set only on items created by an Excel upload, so the batch can be undone.
+  uploadBatchId  String?
+  uploadBatch    DeliveryUploadBatch?  @relation(fields: [uploadBatchId], references: [id], onDelete: SetNull)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  remarks        DeliveryItemRemark[]
+  history        DeliveryItemHistory[]
+
+  @@index([projectId])
+  @@index([projectId, srNo])
+  @@index([stageId])
+  @@index([uploadBatchId])
+}
+
+/// One Excel upload against a project's delivery tracker. `snapshot` holds what
+/// is needed to undo it: the ids of created items and the before-values of
+/// updated ones.
+model DeliveryUploadBatch {
+  id             String                @id @default(uuid())
+  projectId      String
+  project        Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploadedById   String
+  uploadedBy     User                  @relation("DeliveryUploadBatchUploader", fields: [uploadedById], references: [id])
+  fileName       String?
+  fileHash       String?
+  createdCount   Int                   @default(0)
+  updatedCount   Int                   @default(0)
+  unchangedCount Int                   @default(0)
+  errorCount     Int                   @default(0)
+  errors         Json?
+  snapshot       Json?
+  status         String                @default("COMPLETED") // COMPLETED | ROLLED_BACK
+  createdAt      DateTime              @default(now())
+  rolledBackAt   DateTime?
+  items          DeliveryItem[]
+  history        DeliveryItemHistory[]
+
+  @@index([projectId, createdAt])
+  @@index([uploadedById])
+}
+
+/// Canonical delivery lifecycle stages. Replaces the free-text `currentStage`
+/// field, which had already drifted into casing variants ("UAT" vs "uat").
+model DeliveryStageMaster {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveryItems DeliveryItem[]
+
+  @@index([isActive])
+}
+
+model DeliveryItemRemark {
+  id             String       @id @default(uuid())
+  deliveryItemId String
+  deliveryItem   DeliveryItem @relation(fields: [deliveryItemId], references: [id], onDelete: Cascade)
+  date           DateTime
+  content        String
+  createdBy      String
+  createdAt      DateTime     @default(now())
+
+  @@index([deliveryItemId])
+}
+
+/// Per-project header fields for the delivery tracker report. Authored on the
+/// tracker screen rather than at send time, so the same values feed the Excel
+/// export, the preview and the emailed attachment.
+model DeliveryReportSettings {
+  id                String    @id @default(uuid())
+  projectId         String    @unique
+  project           Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  reportDate        DateTime?
+  preparedBy        String?
+  statusSummary     String?
+  // Rich-text "Challenges" section — rendered only when includeChallenges is true.
+  challenges        String?
+  includeChallenges Boolean   @default(true)
+  updatedById       String?
+  updatedBy         User?     @relation("ReportSettingsUpdatedBy", fields: [updatedById], references: [id])
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+/// Audit trail of every delivery tracker report email — who sent it, who it was
+/// prepared by, where it went, and whether it succeeded.
+model DeliveryReportSend {
+  id         String   @id @default(uuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sentById   String
+  sentBy     User     @relation("ReportSentBy", fields: [sentById], references: [id])
+  preparedBy String
+  reportDate DateTime
+  recipients String[]
+  cc         String[]
+  subject    String
+  itemCount  Int      @default(0)
+  status     String
+  messageId  String?
+  error      String?
+  sentAt     DateTime @default(now())
+
+  @@index([projectId])
+  @@index([sentById])
+}
+
+/// Audit trail of delivery tracker Excel exports — who exported it, which project,
+/// when, report settings/metadata, and item count.
+model DeliveryExportHistory {
+  id         String   @id @default(uuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation("TrackerExportedBy", fields: [userId], references: [id])
+  reportDate DateTime?
+  preparedBy String?
+  itemCount  Int      @default(0)
+  fileName   String?
+  fileSize   String?
+  status     String   @default("SUCCESS")
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([userId])
+}
+
+model DeliveryItemHistory {
+  id             String               @id @default(uuid())
+  deliveryItemId String
+  deliveryItem   DeliveryItem         @relation(fields: [deliveryItemId], references: [id], onDelete: Cascade)
+  field          String
+  oldValue       String?
+  newValue       String?
+  changedBy      String
+  changedAt      DateTime             @default(now())
+  // Set when the change was written by an Excel upload (removed again on undo).
+  uploadBatchId  String?
+  uploadBatch    DeliveryUploadBatch? @relation(fields: [uploadBatchId], references: [id], onDelete: SetNull)
+
+  @@index([deliveryItemId])
+  @@index([uploadBatchId])
+}
+
+// ── QA TEST MANAGEMENT ────────────────────────────────────────────────────────
+
+enum TestCaseType {
+  MANUAL
+  AUTOMATED
+}
+
+enum TestCaseCategory {
+  FUNCTIONAL
+  UI
+  API
+  SECURITY
+  PERFORMANCE
+  OTHER
+}
+
+enum TestCasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TestCaseStatus {
+  DRAFT
+  ACTIVE
+  DEPRECATED
+}
+
+enum TestRunStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  ABORTED
+}
+
+enum TestEnvironment {
+  DEV
+  STAGING
+  UAT
+  PRODUCTION
+  OTHER
+}
+
+enum ExecutionResult {
+  NOT_RUN
+  PASSED
+  FAILED
+  BLOCKED
+  SKIPPED
+}
+
+model TestSuite {
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  cases       TestCase[]
+  createdById String
+  createdBy   User       @relation("TestSuiteCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([projectId])
+}
+
+model TestCase {
+  id               String           @id @default(uuid())
+  title            String
+  description      String?
+  preconditions    String?
+  steps            Json             @default("[]")
+  expectedResult   String?
+  priority         TestCasePriority @default(MEDIUM)
+  status           TestCaseStatus   @default(DRAFT)
+  suiteId          String
+  suite            TestSuite        @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  assignedToId     String?
+  assignedTo       User?            @relation("TestCaseAssignedTo", fields: [assignedToId], references: [id])
+  createdById      String
+  createdBy        User             @relation("TestCaseCreatedBy", fields: [createdById], references: [id])
+  executions       TestExecution[]
+  type             TestCaseType     @default(MANUAL)
+  category         TestCaseCategory @default(FUNCTIONAL)
+  tags             String[]         @default([])
+  automationId     String?
+  requirementId    String?
+  lastResult       ExecutionResult?
+  lastActualResult String?
+  lastExecutedAt   DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([suiteId])
+  @@index([status])
+}
+
+model TestRun {
+  id           String          @id @default(uuid())
+  name         String
+  description  String?
+  projectId    String
+  project      Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sprintId     String?
+  sprint       Sprint?         @relation(fields: [sprintId], references: [id])
+  status       TestRunStatus   @default(PLANNED)
+  environment  TestEnvironment @default(STAGING)
+  plannedAt    DateTime?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdById  String
+  createdBy    User            @relation("TestRunCreatedBy", fields: [createdById], references: [id])
+  executions   TestExecution[]
+  deploymentId String?
+  deployment   Deployment?     @relation(fields: [deploymentId], references: [id])
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model TestExecution {
+  id             String          @id @default(uuid())
+  runId          String
+  run            TestRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  caseId         String
+  case           TestCase        @relation(fields: [caseId], references: [id])
+  result         ExecutionResult @default(NOT_RUN)
+  actualResult   String?
+  stepResults    Json? // format: [{ stepOrder: number, result: ExecutionResult, actual?: string }]
+  notes          String?
+  defectTicketId String?
+  defectTicket   Ticket?         @relation(fields: [defectTicketId], references: [id])
+  executedById   String?
+  executedBy     User?           @relation("TestExecutedBy", fields: [executedById], references: [id])
+  executedAt     DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  retestRequired Boolean         @default(false)
+
+  @@unique([runId, caseId])
+  @@index([runId])
+  @@index([caseId])
+}
+
+// ── DEPLOYMENTS ───────────────────────────────────────────────────────────────
+
+model Deployment {
+  id           String          @id @default(uuid())
+  projectId    String
+  project      Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  environment  TestEnvironment
+  version      String?
+  deployedAt   DateTime        @default(now())
+  deployedById String
+  deployedBy   User            @relation("UserDeployments", fields: [deployedById], references: [id])
+  sprintId     String?
+  sprint       Sprint?         @relation("SprintDeployments", fields: [sprintId], references: [id])
+  status       String          @default("SUCCESS") // SUCCESS, FAILED
+  notes        String?
+  testRuns     TestRun[]
+  tasks        Task[]          @relation("DeploymentTasks")
+  tickets      Ticket[]        @relation("DeploymentTickets")
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([projectId])
+  @@index([environment])
+}
+
+// ── ASSET MANAGEMENT ──────────────────────────────────────────────────────────
+
+enum AssetType {
+  HARDWARE
+  SOFTWARE
+  LICENSE
+  LAPTOP
+  CHARGER
+  OTHER
+}
+
+enum AssetStatus {
+  AVAILABLE
+  ALLOCATED
+  IN_MAINTENANCE
+  RETIRED
+  LOST
+}
+
+model Asset {
+  id             String      @id @default(uuid())
+  assetTag       String      @unique // E.g. LPT-001
+  name           String // E.g. MacBook Pro 16
+  type           AssetType
+  status         AssetStatus @default(AVAILABLE)
+  serialNumber   String?
+  vendor         String?
+  purchaseDate   DateTime?
+  warrantyExpiry DateTime?
+
+  // Ownership
+  isClientProvided Boolean @default(false)
+  clientId         String?
+  client           Client? @relation(fields: [clientId], references: [id])
+
+  // Tracking
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id])
+
+  allocatedToId String?
+  allocatedTo   User?   @relation("AssetAllocatedTo", fields: [allocatedToId], references: [id])
+
+  currentlyUsedById String?
+  currentlyUsedBy   User?   @relation("AssetCurrentlyUsedBy", fields: [currentlyUsedById], references: [id])
+
+  // Client-side point of contact for this asset (only meaningful for client-provided assets)
+  spokespersonId String?
+  spokesperson   Spokesperson? @relation("AssetSpokesperson", fields: [spokespersonId], references: [id])
+
+  // Project this asset is associated with
+  projectId String?
+  project   Project? @relation("AssetProject", fields: [projectId], references: [id])
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  history AssetHistory[]
+
+  @@index([type])
+  @@index([status])
+  @@index([clientId])
+  @@index([allocatedToId])
+  @@index([spokespersonId])
+  @@index([projectId])
+}
+
+// Client-side point of contact. Created on the fly from the asset form's searchable
+// combobox and reused across assets for the same client. Uniqueness of an active
+// name per client (case-insensitive) is enforced in SpokespersonsService, which
+// reactivates a soft-deleted match rather than creating a duplicate.
+model Spokesperson {
+  id          String   @id @default(uuid())
+  name        String
+  clientId    String
+  isActive    Boolean  @default(true)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  client    Client  @relation(fields: [clientId], references: [id])
+  createdBy User?   @relation("SpokespersonCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?   @relation("SpokespersonUpdatedBy", fields: [updatedById], references: [id])
+  assets    Asset[] @relation("AssetSpokesperson")
+
+  @@index([clientId])
+  @@index([isActive])
+}
+
+// Monthly acknowledgement that a manager (TL/RA) has verified the asset allocations
+// of their team (assets whose "currently used by" user reports to them). One row per
+// reporting authority per period ("YYYY-MM"); drives the 1st/5th/7th/10th reminder
+// escalation. Sends themselves are logged/deduped via EmailLog.
+model AssetAllocationConfirmation {
+  id                   String    @id @default(uuid())
+  reportingAuthorityId String
+  period               String // "YYYY-MM"
+  status               String    @default("PENDING") // PENDING | CONFIRMED
+  assetCount           Int       @default(0)
+  confirmedAt          DateTime?
+  confirmedById        String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  reportingAuthority User  @relation("AssetConfirmationRA", fields: [reportingAuthorityId], references: [id])
+  confirmedBy        User? @relation("AssetConfirmationConfirmedBy", fields: [confirmedById], references: [id])
+
+  @@unique([reportingAuthorityId, period])
+  @@index([period])
+  @@index([status])
+}
+
+model AssetHistory {
+  id             String       @id @default(uuid())
+  assetId        String
+  action         String // ALLOCATED, REASSIGNED, RETURNED, MAINTENANCE, STATUS_CHANGE
+  previousUserId String?
+  newUserId      String?
+  previousStatus AssetStatus?
+  newStatus      AssetStatus?
+  notes          String?
+  recordedById   String
+  createdAt      DateTime     @default(now())
+
+  asset      Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  recordedBy User  @relation("AssetHistoryRecordedBy", fields: [recordedById], references: [id])
+
+  @@index([assetId])
+}
+
+// ─── Employee Maturity ────────────────────────────────────────────────────────
+
+model EmployeeMaturity {
+  id                   String   @id @default(uuid())
+  userId               String   @unique
+  userName             String
+  currentMaturityValue Float
+  forTheMonth          DateTime
+  isActive             Boolean  @default(true)
+  remarks              String?
+  createdById          String
+  createdAt            DateTime @default(now())
+  updatedById          String?
+  updatedAt            DateTime @updatedAt
+
+  user      User                      @relation("EmployeeMaturityUser", fields: [userId], references: [id])
+  createdBy User                      @relation("EmployeeMaturityCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?                     @relation("EmployeeMaturityUpdatedBy", fields: [updatedById], references: [id])
+  history   EmployeeMaturityHistory[]
+
+  @@index([forTheMonth])
+}
+
+model EmployeeMaturityHistory {
+  id                 String    @id @default(uuid())
+  employeeMaturityId String
+  userId             String
+  userName           String
+  maturityValue      Float
+  forTheMonth        DateTime
+  isActive           Boolean   @default(true)
+  remarks            String?
+  createdById        String
+  createdAt          DateTime  @default(now())
+  updatedById        String?
+  updatedAt          DateTime?
+
+  employeeMaturity EmployeeMaturity @relation(fields: [employeeMaturityId], references: [id])
+  user             User             @relation("EmployeeMaturityHistoryUser", fields: [userId], references: [id])
+  createdBy        User             @relation("EmployeeMaturityHistoryCreatedBy", fields: [createdById], references: [id])
+  updatedBy        User?            @relation("EmployeeMaturityHistoryUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([userId, forTheMonth])
+  @@index([employeeMaturityId])
+  @@index([forTheMonth])
+}
+
+// ─── Task Type Master ────────────────────────────────────────────────────────
+
+model TaskTypeMaster {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  updatedById String?
+
+  activities TaskActivityMaster[]
+  tasks      Task[]
+  createdBy  User?                @relation("TaskTypeMasterCreatedBy", fields: [createdById], references: [id])
+  updatedBy  User?                @relation("TaskTypeMasterUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([isActive])
+}
+
+model TaskActivityMaster {
+  id          String   @id @default(uuid())
+  taskTypeId  String
+  name        String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  updatedById String?
+
+  taskType      TaskTypeMaster          @relation(fields: [taskTypeId], references: [id])
+  subActivities TaskSubActivityMaster[]
+  createdBy     User?                   @relation("TaskActivityMasterCreatedBy", fields: [createdById], references: [id])
+  updatedBy     User?                   @relation("TaskActivityMasterUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([taskTypeId, name])
+  @@index([taskTypeId])
+  @@index([isActive])
+}
+
+model TaskSubActivityMaster {
+  id          String   @id @default(uuid())
+  activityId  String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+  updatedById String?
+
+  activity         TaskActivityMaster @relation(fields: [activityId], references: [id])
+  createdBy        User?              @relation("TaskSubActivityMasterCreatedBy", fields: [createdById], references: [id])
+  updatedBy        User?              @relation("TaskSubActivityMasterUpdatedBy", fields: [updatedById], references: [id])
+  timesheetEntries TimesheetEntry[]   @relation("TimesheetEntrySubActivity")
+
+  @@unique([activityId, name])
+  @@index([activityId])
+  @@index([isActive])
+}
+
+enum EmailLogStatus {
+  SUCCESS
+  FAILED
+}
+
+enum EmailKind {
+  ATTENDANCE_CHECKIN_MISSING_EMPLOYEE
+  ATTENDANCE_CHECKIN_MISSING_RA
+  ATTENDANCE_CHECKIN_MISSING_HR_DIGEST
+  ASSET_ALLOCATION_CONFIRMATION
+  ATTENDANCE_REGULARIZATION_REQUEST
+  ATTENDANCE_REGULARIZATION_DECISION
+  LEAVE_REQUEST
+  LEAVE_DECISION
+  PROJECT_STATUS_REPORT
+}
+
+// Audit trail of outbound emails (success + detailed failure) and the source of
+// send idempotency. Only SUCCESS rows carry a `dedupeKey`; FAILED rows leave it
+// null so they remain retryable while duplicate successes are blocked by the
+// unique constraint. Append-only — no updatedAt (matches AuditLog/Notification).
+model EmailLog {
+  id            String         @id @default(uuid())
+  kind          EmailKind
+  status        EmailLogStatus
+  recipient     String // "to" address
+  subject       String
+  templateName  String?
+  messageId     String? // nodemailer info.messageId on success
+  error         String? // full error message/stack on failure
+  subjectUserId String? // the employee the mail is ABOUT (null for HR digest)
+  contextDate   DateTime?      @db.Date // the working day being reported
+  dedupeKey     String?        @unique // e.g. "checkin-missing:emp:<userId>:2026-07-15"
+  metadata      Json? // extra detail (SMTP response, absentee count, etc.)
+  createdAt     DateTime       @default(now())
+  subjectUser   User?          @relation("EmailLogSubjectUser", fields: [subjectUserId], references: [id])
+
+  @@index([kind])
+  @@index([status])
+  @@index([subjectUserId])
+  @@index([contextDate])
+  @@index([createdAt])
+}
+
+// ─── Todo List / Personal Activities ────────────────────────────────────────
+// Personal to-do items a user creates for themselves and/or other members.
+// Only the creator may act on one (postpone / complete / cancel); assignees get
+// a read-only view plus notifications.
+
+enum ActivityStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum ActivityActionType {
+  CREATED
+  POSTPONED
+  COMPLETED
+  CANCELLED
+  SERIES_CANCELLED
+  REMARK_ADDED
+  ESCALATED
+}
+
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum RecurrenceStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model Activity {
+  id            String         @id @default(uuid())
+  name          String
+  description   String?
+  // Optional voice-note description: file name inside the activity-voice upload folder + length.
+  descriptionAudioFile String?
+  descriptionAudioSec  Int?
+  createdById   String
+  // Who asked for the activity when the creator logged it on someone's behalf.
+  assignedById  String?
+  // Full date+time so a single range query drives every list and filter. When
+  // allDay is set the times are normalised to the day's bounds.
+  startAt       DateTime
+  endAt         DateTime
+  allDay        Boolean        @default(false)
+  status        ActivityStatus @default(PENDING)
+  postponeCount Int            @default(0)
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // Set when the row was generated from a recurring series. Null for one-off
+  // activities, which behave exactly as they did before recurrence existed.
+  recurrenceId   String?
+  // Date-only anchor of the occurrence within its series. Paired with
+  // recurrenceId it is the idempotency key that makes generation re-runnable.
+  occurrenceDate DateTime?
+
+  createdBy  User                @relation("ActivityCreatedBy", fields: [createdById], references: [id])
+  assignedBy User?               @relation("ActivityAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  recurrence ActivityRecurrence? @relation(fields: [recurrenceId], references: [id], onDelete: SetNull)
+  assignees  ActivityAssignee[]
+  // Followers (told when it is completed / cancelled) and people who may escalate it.
+  watchers   ActivityWatcher[]
+  escalators ActivityEscalator[]
+  actions    ActivityAction[]
+
+  @@unique([recurrenceId, occurrenceDate])
+  @@index([createdById])
+  @@index([assignedById])
+  @@index([status])
+  @@index([startAt])
+  @@index([recurrenceId])
+  @@index([createdById, startAt])
+  @@index([status, startAt])
+}
+
+model ActivityAssignee {
+  activityId String
+  userId     String
+  createdAt  DateTime @default(now())
+
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([activityId, userId])
+  @@index([userId])
+}
+
+model ActivityWatcher {
+  activityId String
+  userId     String
+  createdAt  DateTime @default(now())
+
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  user     User     @relation("ActivityWatcherUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([activityId, userId])
+  @@index([userId])
+}
+
+model ActivityEscalator {
+  activityId String
+  userId     String
+  createdAt  DateTime @default(now())
+
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  user     User     @relation("ActivityEscalatorUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([activityId, userId])
+  @@index([userId])
+}
+
+model ActivityAction {
+  id          String             @id @default(uuid())
+  activityId  String
+  actorId     String
+  type        ActivityActionType
+  fromStartAt DateTime?
+  fromEndAt   DateTime?
+  toStartAt   DateTime?
+  toEndAt     DateTime?
+  remarks     String?
+  // Optional voice-note remark: file name inside the activity-voice upload folder + length.
+  audioFile   String?
+  audioSec    Int?
+  // Files attached to this remark: [{ key, name, size, mimeType }] — objects in the S3 bucket.
+  attachments Json?
+  createdAt   DateTime           @default(now())
+
+  activity Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  actor    User     @relation("ActivityActionActor", fields: [actorId], references: [id])
+
+  @@index([activityId])
+  @@index([actorId])
+}
+
+// ─── Recurring Todo Series ───────────────────────────────────────────────────
+// A rule that materialises real Activity rows. Occurrences are generated ahead
+// to a rolling horizon rather than computed on read, so every existing query,
+// action and audit trail keeps working on a per-occurrence basis unchanged.
+
+model ActivityRecurrence {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  createdById String
+
+  frequency   RecurrenceFrequency
+  interval    Int                 @default(1) // every N days / weeks / months
+  byWeekday   Int[]               @default([]) // WEEKLY only: 0=Sun … 6=Sat
+  byMonthDay  Int? // MONTHLY only: 1–31, clamped to the last day of short months
+  byMonthDays Int[]               @default([]) // MONTHLY only: multiple days (1–31)
+
+  // Template window. The date part seeds the first occurrence; the time part and
+  // duration are copied onto every occurrence the rule generates.
+  seriesStartAt  DateTime
+  durationMin    Int
+  allDay         Boolean   @default(false)
+  seriesEndDate  DateTime? // null together with maxOccurrences = open-ended
+  maxOccurrences Int?
+
+  // Skips Saturdays, Sundays and non-optional public holidays. Skipped days are
+  // dropped, not shifted, and never count against maxOccurrences.
+  skipNonWorkingDays Boolean @default(false)
+
+  status          RecurrenceStatus @default(ACTIVE)
+  // Horizon watermark — occurrences exist up to this instant. The daily cron
+  // extends it; nothing else may move it backwards.
+  generatedUntil  DateTime?
+  occurrenceCount Int              @default(0)
+  cancelledAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  createdBy  User                         @relation("ActivityRecurrenceCreatedBy", fields: [createdById], references: [id])
+  assignees  ActivityRecurrenceAssignee[]
+  activities Activity[]
+
+  @@index([createdById])
+  @@index([status, generatedUntil])
+}
+
+model ActivityRecurrenceAssignee {
+  recurrenceId String
+  userId       String
+  createdAt    DateTime @default(now())
+
+  recurrence ActivityRecurrence @relation(fields: [recurrenceId], references: [id], onDelete: Cascade)
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([recurrenceId, userId])
+  @@index([userId])
+}
+
+// ============================================================================
+// WHAT'S NEW FEATURE (Feature Announcement & Discovery)
+// ============================================================================
+
+model AppFeature {
+  id               String   @id @default(uuid())
+  title            String
+  shortDescription String
+  fullDescription  String?
+  iconName         String? // Name of the Lucide icon (e.g. "Settings2")
+  featureUrl       String?
+  demoVideoUrl     String?
+  isActive         Boolean  @default(true)
+  publishedAt      DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  roles        AppFeatureRole[]
+  interactions AppFeatureInteraction[]
+}
+
+model AppFeatureRole {
+  id        String @id @default(uuid())
+  featureId String
+  roleName  String // Matches Role name in your system
+
+  feature AppFeature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@unique([featureId, roleName])
+  @@index([roleName])
+}
+
+model AppFeatureInteraction {
+  id        String   @id @default(uuid())
+  featureId String
+  userId    String
+  viewedAt  DateTime @default(now())
+
+  feature AppFeature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  user    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([featureId, userId])
+  @@index([userId])
+}
+
+// ============================================================================
+// OUTSOURCE FEEDBACK (outsourced employees placed at clients + monthly reviews)
+// ============================================================================
+
+model OutsourceFeedback {
+  id                    String                   @id @default(uuid())
+  outsourceEmployeeName String
+  managerName           String
+  clientId              String
+  client                Client                   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  employeeContact       String?
+  managerContact        String?
+  employeeEmail         String?
+  managerEmail          String?
+  isDeleted             Boolean                  @default(false)
+  createdById           String
+  createdBy             User                     @relation("OutsourceFeedbackCreatedBy", fields: [createdById], references: [id])
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  monthlyReviews        OutsourceMonthlyReview[]
+}
+
+model OutsourceMonthlyReview {
+  id                  String            @id @default(uuid())
+  outsourceEmployeeId String
+  outsourceEmployee   OutsourceFeedback @relation(fields: [outsourceEmployeeId], references: [id], onDelete: Cascade)
+  reviewDate          DateTime
+  employeeRemarks     String
+  managerRemarks      String
+  createdById         String
+  createdBy           User              @relation("OutsourceMonthlyReviewCreatedBy", fields: [createdById], references: [id])
+  isDeleted           Boolean           @default(false)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+}
+
+// ============================================================================
+// TEMPLATE MASTER (Centralized download template registry)
+// ============================================================================
+
+model TemplateMaster {
+  id           String   @id @default(uuid())
+  code         String   @unique // e.g. ANNOUNCEMENT_IMPORT, USER_BULK_UPLOAD
+  name         String
+  description  String?
+  module       String // e.g. ANNOUNCEMENTS, USERS, HOLIDAYS, TASKS
+  fileType     String   @default("CSV") // CSV | XLSX
+  columns      Json // Array: [{ key, label, required, sample, description, type }]
+  instructions String?  @db.Text
+  isActive     Boolean  @default(true)
+  version      Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ReportThresholdMaster {
+  id                  String  @id @default(uuid())
+  standardHoursPerDay Decimal @default(8.00) @db.Decimal(5, 2)
+  lateSubmissionDays  Int     @default(5)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("report_threshold_master")
+}
+
+model ExportLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ── APP CRASH LOG ────────────────────────────────────────────────────────────
+// Crashes and errors reported by the mobile app itself (JS errors, render
+// crashes, previous-session-ended-abruptly markers). Written by POST /app-crash-logs.
+
+model AppCrashLog {
+  id             String   @id @default(uuid())
+  type           String // JS_ERROR | RENDER_CRASH | UNHANDLED_REJECTION | ABRUPT_EXIT | BACKGROUND_KILL
+  fatal          Boolean  @default(false)
+  message        String
+  stack          String?
+  componentStack String?
+  screen         String? // Route the user was on, when known
+  userId         String? // Self-reported by the app (not a foreign key: crashes can happen logged out)
+  userEmail      String?
+  appVersion     String?
+  platform       String? // android | ios
+  osVersion      String?
+  deviceBrand    String?
+  deviceModel    String?
+  extra          Json?
+  ipAddress      String?
+  occurredAt     DateTime // When it happened on the device
+  createdAt      DateTime @default(now())
+
+  @@index([type])
+  @@index([userId])
+  @@index([deviceModel])
+  @@index([occurredAt])
+}
+
+// ── ERROR LOG ────────────────────────────────────────────────────────────────
+// One row per failed API request, written by AllExceptionsFilter.
+
+model ErrorLog {
+  id            String   @id @default(uuid())
+  method        String // GET, POST, PUT, PATCH, DELETE
+  url           String // Full request URL
+  module        String // Derived from URL segment (e.g. "USERS", "TIMESHEETS")
+  statusCode    Int // HTTP status code: 400, 401, 403, 404, 500 etc.
+  errorMessage  String // Human-readable error message
+  errorStack    String? // Stack trace (only for 5xx errors)
+  userId        String? // Who hit the endpoint (null for unauthenticated)
+  ipAddress     String? // Client IP address
+  requestBody   Json? // Request body (passwords/tokens stripped)
+  requestQuery  Json? // Query string params
+  requestParams Json? // Route params (:id etc.)
+  createdAt     DateTime @default(now())
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([module])
+  @@index([statusCode])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([method])
+}
+
+// ── SYSTEM LOOKUPS & DROPDOWNS ───────────────────────────────────────────────
+// Dynamic lookup categories and configurable dropdown values
+
+model LookupCategory {
+  id          String        @id @default(uuid())
+  code        String        @unique // e.g. "EXPENSE_CATEGORY", "TASK_STATUS"
+  name        String        // Display name
+  description String?
+  isSystem    Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  values      LookupValue[]
+
+  @@index([isActive])
+}
+
+model LookupValue {
+  id          String         @id @default(uuid())
+  categoryId  String
+  category    LookupCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  code        String         // Stored value / machine key
+  label       String         // Display label
+  description String?
+  color       String?        // Hex or badge style (e.g. #3b82f6)
+  icon        String?
+  sortOrder   Int            @default(0)
+  isDefault   Boolean        @default(false)
+  isActive    Boolean        @default(true)
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([categoryId, code])
+  @@index([categoryId, isActive])
+  @@index([code])
+}
+
+// ── REVIEW FINDINGS ───────────────────────────────────────────────────────────
+
+enum ReviewType {
+  CODE
+  QUALITY
+  SECURITY
+  PROCESS
+  UAT
+  DESIGN
+  DOCUMENTATION
+  OTHER
+}
+
+enum ReviewTaskStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum FindingCategory {
+  FUNCTIONAL
+  TECHNICAL
+  QUALITY
+  SECURITY
+  DOCUMENTATION
+  PROCESS
+}
+
+enum FindingPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum FindingStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING_VERIFICATION
+  CLOSED
+}
+
+enum FindingAttachmentType {
+  FINDING_EVIDENCE
+  RESOLUTION_EVIDENCE
+  OTHER
+}
+
+model ReviewTask {
+  id          String           @id @default(uuid())
+  taskNumber  String           @unique // RT-YYYY-NNNN
+  projectId   String
+  title       String
+  description String?
+  reviewType  ReviewType
+  reviewerId  String
+  startDate   DateTime         @db.Date
+  endDate     DateTime         @db.Date
+  status      ReviewTaskStatus @default(OPEN)
+  createdById String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  project      Project                 @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  reviewer     User                    @relation("ReviewTaskReviewer", fields: [reviewerId], references: [id])
+  createdBy    User                    @relation("ReviewTaskCreator", fields: [createdById], references: [id])
+  participants ReviewTaskParticipant[]
+  findings     ReviewFinding[]
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model ReviewTaskParticipant {
+  id           String     @id @default(uuid())
+  reviewTaskId String
+  userId       String
+  reviewTask   ReviewTask @relation(fields: [reviewTaskId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id])
+
+  @@unique([reviewTaskId, userId])
+}
+
+model ReviewFinding {
+  id                    String          @id @default(uuid())
+  findingNumber         String          @unique // RF-YYYY-NNNN
+  projectId             String
+  reviewTaskId          String
+  title                 String          @db.VarChar(200)
+  description           String
+  category              FindingCategory
+  priority              FindingPriority
+  status                FindingStatus   @default(OPEN)
+  identifiedById        String
+  identifiedAt          DateTime
+  assignedToId          String
+  targetClosureDate     DateTime        @db.Date
+  proposedAction        String?
+  actionRemarks         String?
+  resolutionDescription String?
+  verificationRemarks   String?
+  verifiedById          String?
+  verifiedAt            DateTime?
+  closureRemarks        String?
+  closedById            String?
+  closedAt              DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  project      Project                   @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  reviewTask   ReviewTask                @relation(fields: [reviewTaskId], references: [id], onDelete: Cascade)
+  identifiedBy User                      @relation("FindingIdentifier", fields: [identifiedById], references: [id])
+  assignedTo   User                      @relation("FindingAssignee", fields: [assignedToId], references: [id])
+  verifiedBy   User?                     @relation("FindingVerifier", fields: [verifiedById], references: [id])
+  closedBy     User?                     @relation("FindingCloser", fields: [closedById], references: [id])
+  activities   ReviewFindingActivity[]
+  attachments  ReviewFindingAttachment[]
+
+  @@index([projectId])
+  @@index([reviewTaskId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([targetClosureDate])
+}
+
+model ReviewFindingActivity {
+  id            String   @id @default(uuid())
+  findingId     String
+  activityType  String   @db.VarChar(50)
+  oldValue      String?
+  newValue      String?
+  remarks       String?
+  performedById String
+  performedAt   DateTime @default(now())
+
+  finding     ReviewFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  performedBy User          @relation(fields: [performedById], references: [id])
+
+  @@index([findingId, performedAt])
+}
+
+model ReviewFindingAttachment {
+  id             String                @id @default(uuid())
+  findingId      String
+  fileName       String                @db.VarChar(255)
+  fileReference  String
+  mimeType       String?
+  sizeBytes      Int?
+  attachmentType FindingAttachmentType @default(FINDING_EVIDENCE)
+  uploadedById   String
+  uploadedAt     DateTime              @default(now())
+
+  finding    ReviewFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  uploadedBy User          @relation(fields: [uploadedById], references: [id])
+
+  @@index([findingId])
+}
+
+// Monthly timesheet reviews preserve employee/RA identities as immutable snapshots.
+// Their identifiers intentionally have no User foreign keys, so history survives
+// account deletion and subsequent reporting-authority changes.
+enum MonthlyTimesheetPeriodStatus {
+  OPEN
+  FINALIZED
+}
+
+enum MonthlyTimesheetEntryStatus {
+  PENDING
+  CONFIRMED
+  ADJUSTED
+  AUTO_CONFIRMED
+  MANUAL_REVIEW
+}
+
+enum MonthlyTimesheetDeliveryStage {
+  RA_REVIEW
+  HR_REPORT
+}
+
+enum MonthlyTimesheetDeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  UNKNOWN
+}
+
+model MonthlyTimesheetPeriod {
+  id                   String                       @id @default(uuid())
+  period               String                       @unique @db.VarChar(7)
+  periodStart          DateTime                     @db.Date
+  periodEndExclusive   DateTime                     @db.Date
+  scheduledAt          DateTime                     @db.Timestamptz(3)
+  confirmationDeadline DateTime                     @db.Timestamptz(3)
+  hrScheduledAt        DateTime                     @db.Timestamptz(3)
+  snapshotAt           DateTime                     @db.Timestamptz(3)
+  finalizedAt          DateTime?                    @db.Timestamptz(3)
+  status               MonthlyTimesheetPeriodStatus @default(OPEN)
+  createdAt            DateTime                     @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime                     @updatedAt @db.Timestamptz(3)
+
+  entries    MonthlyTimesheetEntry[]
+  deliveries MonthlyTimesheetDelivery[]
+
+  @@index([status, confirmationDeadline])
+}
+
+model MonthlyTimesheetEntry {
+  id                      String                      @id @default(uuid())
+  periodId                String
+  userId                  String
+  employeeName            String
+  employeeEmail           String
+  employeeCode            String?
+  departmentName          String?
+  reportingAuthorityId    String?
+  reportingAuthorityName  String?
+  reportingAuthorityEmail String?
+  originalDates           String[]
+  confirmedDates          String[]                    @default([])
+  status                  MonthlyTimesheetEntryStatus @default(PENDING)
+  decisionById            String?
+  decisionAt              DateTime?                   @db.Timestamptz(3)
+  reason                  String?
+  revision                Int                         @default(0)
+  decisionHistory         Json                        @default("[]")
+  createdAt               DateTime                    @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime                    @updatedAt @db.Timestamptz(3)
+
+  period MonthlyTimesheetPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+
+  @@unique([periodId, userId])
+  @@index([reportingAuthorityId, periodId])
+}
+
+model MonthlyTimesheetDelivery {
+  id             String                         @id @default(uuid())
+  periodId       String
+  stage          MonthlyTimesheetDeliveryStage
+  recipientKey   String
+  recipientEmail String
+  status         MonthlyTimesheetDeliveryStatus @default(PENDING)
+  attemptCount   Int                            @default(0)
+  messageId      String
+  lockedAt       DateTime?                      @db.Timestamptz(3)
+  lockToken      String?
+  sentAt         DateTime?                      @db.Timestamptz(3)
+  lastError      String?
+  createdAt      DateTime                       @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime                       @updatedAt @db.Timestamptz(3)
+
+  period MonthlyTimesheetPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+
+  @@unique([periodId, stage, recipientKey])
+  @@index([stage, status])
+}
+
+// ─── Incidents ────────────────────────────────────────────────────────────────
+// type / severity / priority / environment / status hold LookupValue.code values
+// from the INCIDENT_* lookup categories (no DB enums, so dropdowns stay admin-editable).
+model Incident {
+  id                String               @id @default(uuid())
+  incidentNumber    String               @unique @db.VarChar(30)
+  projectId         String
+  title             String               @db.VarChar(200)
+  description       String
+  type              String               @db.VarChar(50)
+  severity          String               @db.VarChar(50)
+  priority          String               @db.VarChar(50)
+  environment       String               @db.VarChar(50)
+  status            String               @db.VarChar(50)
+  remarks           String?
+  reportedById      String
+  reportedAt        DateTime             @default(now())
+  assignedToId      String?
+  resolutionRemarks String?
+  resolvedAt        DateTime?
+  closedById        String?
+  closedAt          DateTime?
+  createdAt         DateTime             @default(now())
+  createdById       String
+  updatedAt         DateTime             @updatedAt
+  updatedById       String?
+  project           Project              @relation(fields: [projectId], references: [id])
+  reportedBy        User                 @relation("IncidentReportedBy", fields: [reportedById], references: [id])
+  assignedTo        User?                @relation("IncidentAssignedTo", fields: [assignedToId], references: [id])
+  closedBy          User?                @relation("IncidentClosedBy", fields: [closedById], references: [id])
+  activities        IncidentActivity[]
+  attachments       IncidentAttachment[]
+  // All assignees. assignedToId / assignedTo stay as the "primary" (first) assignee,
+  // kept in sync by the service (same convention as Ticket.assigneeId + TicketAssignee).
+  assignees         IncidentAssignee[]
+
+  @@index([projectId, status])
+  @@index([projectId, reportedAt])
+  @@index([assignedToId])
+}
+
+model IncidentActivity {
+  id         String   @id @default(uuid())
+  incidentId String
+  actorId    String
+  action     String   @db.VarChar(40)
+  fromValue  String?  @db.VarChar(100)
+  toValue    String?  @db.VarChar(100)
+  remarks    String?
+  changes    Json?
+  createdAt  DateTime @default(now())
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  actor      User     @relation("IncidentActivityActor", fields: [actorId], references: [id])
+
+  @@index([incidentId, createdAt])
+}
+
+model IncidentAttachment {
+  id           String   @id @default(uuid())
+  incidentId   String
+  fileName     String   @db.VarChar(255)
+  fileUrl      String
+  mimeType     String   @db.VarChar(150)
+  sizeBytes    Int
+  uploadedById String
+  uploadedAt   DateTime @default(now())
+  incident     Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  uploadedBy   User     @relation("IncidentAttachmentUploader", fields: [uploadedById], references: [id])
+
+  @@index([incidentId])
+}
+
+model IncidentAssignee {
+  incidentId String
+  userId     String
+  assignedAt DateTime @default(now())
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  user       User     @relation("IncidentAssignments", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([incidentId, userId])
+  @@index([userId])
+}

@@ -1,7 +1,7 @@
 import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AppState, type AppStateStatus } from "react-native";
 
-import { api, postJson, setOnUnauthorized, uploadFiles, uploadVoiceNote } from "@/src/api";
+import { ApiError, api, postJson, setOnUnauthorized, uploadFiles, uploadVoiceNote } from "@/src/api";
 import { storage } from "@/src/utils/storage";
 import { setCrashUser } from "@/src/utils/crash-reporter";
 import { getTaskTimestamp } from "@/src/utils/date-utils";
@@ -41,6 +41,24 @@ function cacheTasks(list: Task[]) {
     void storage.setItem(STORAGE_CACHED_TASKS, JSON.stringify(slim));
   }, 500);
 }
+
+/** Cached tasks saved before "watchers" was renamed to "informers". */
+function migrateCachedTask(task: any): Task {
+  if (task && task.watchers !== undefined && task.informers === undefined) {
+    const { watchers, ...rest } = task;
+    return { ...rest, informers: watchers };
+  }
+  return task;
+}
+
+/** Offline-queued request bodies saved before "watcherIds" was renamed to "informerIds". */
+function migrateQueuedBody(body: Record<string, unknown>): Record<string, unknown> {
+  if (body && "watcherIds" in body && !("informerIds" in body)) {
+    const { watcherIds, ...rest } = body;
+    return { ...rest, informerIds: watcherIds };
+  }
+  return body;
+}
 const STORAGE_OFFLINE_QUEUE = "ticktrack_offline_task_queue";
 const STORAGE_CACHED_LISTS = "ticktrack_cached_lists";
 const STORAGE_CACHED_HABITS = "ticktrack_cached_habits";
@@ -72,8 +90,10 @@ type AppContextValue = {
   postponeTask: (task: Task, payload: { endDate: string; startDate?: string; startTime?: string; endTime?: string; remarks?: string; voice?: VoiceNote }) => Promise<void>;
   addRemark: (task: Task, remarks: string, voice?: VoiceNote, files?: LocalAttachment[]) => Promise<void>;
   loadTaskDetail: (task: Task) => Promise<void>;
-  /** Tasks I watch and tasks I may escalate — kept out of the main task list. */
-  loadFollowing: () => Promise<{ watching: Task[]; escalations: Task[] }>;
+  /** Tasks I am kept informed about and tasks I may escalate — kept out of the main task list. */
+  loadFollowing: () => Promise<{ informed: Task[]; escalations: Task[] }>;
+  /** Only the tasks I may escalate; feeds the Escalations section of Today / Next 7 Days. */
+  loadEscalations: () => Promise<Task[]>;
   escalateTask: (task: Task, remarks?: string) => Promise<void>;
   dismissReminder: (task: Task, reminderKey: string) => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
@@ -342,7 +362,7 @@ function normalizeActivity(act: any): Task {
     assigneeIds: uniqueActAssigneeIds,
     assignees: normalizedAssignees.length > 0 ? normalizedAssignees : null,
     assigneeName: assigneeName || null,
-    watchers: Array.isArray(act.watchers) ? act.watchers.map((w: any) => ({ id: w.userId ?? w.id, name: w.name, email: w.email })) : null,
+    informers: Array.isArray(act.informers) ? act.informers.map((w: any) => ({ id: w.userId ?? w.id, name: w.name, email: w.email })) : null,
     escalators: Array.isArray(act.escalators) ? act.escalators.map((e: any) => ({ id: e.userId ?? e.id, name: e.name, email: e.email })) : null,
     isEscalator: Boolean(act.isEscalator),
     source: "activity",
@@ -524,7 +544,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
       for (const item of queue) {
         try {
-          const res = await postJson<any>(item.endpoint, item.body, activeToken);
+          const res = await postJson<any>(item.endpoint, migrateQueuedBody(item.body), activeToken);
           if (res) {
             anySynced = true;
             console.log(`[TickTrack] Successfully synced offline task: ${item.tempId}`);
@@ -904,30 +924,55 @@ export function AppProvider({ children }: PropsWithChildren) {
     void refreshReminders();
   };
 
-  const silentReauth = useCallback(async (): Promise<string | null> => {
-    try {
-      const rawCreds = await storage.secureGet<string | null>("ticktrack_saved_creds", null);
-      if (!rawCreds) return null;
-      const creds = typeof rawCreds === "string" ? JSON.parse(rawCreds) : rawCreds;
-      if (!creds?.email || !creds?.password) return null;
+  // Concurrent 401s (startup /auth/me, refresh, offline sync) share one login attempt instead of
+  // each sending their own.
+  const reauthPromiseRef = useRef<Promise<string | null> | null>(null);
 
-      const result = await postJson<{ access_token?: string; token?: string; user: User }>("/auth/login", {
-        email: String(creds.email).trim(),
-        password: String(creds.password),
-      });
-      const newToken = result.access_token || result.token || (result as any).accessToken;
-      if (newToken) {
-        await storage.secureSet("ticktrack_token", newToken);
-        setToken(newToken);
-        if (result.user) {
-          setUser((prev) => ({ ...(prev || {}), ...result.user }));
+  const silentReauth = useCallback((): Promise<string | null> => {
+    if (reauthPromiseRef.current) return reauthPromiseRef.current;
+    const attempt = (async (): Promise<string | null> => {
+      try {
+        const rawCreds = await storage.secureGet<string | null>("ticktrack_saved_creds", null);
+        if (!rawCreds) return null;
+        const creds = typeof rawCreds === "string" ? JSON.parse(rawCreds) : rawCreds;
+        if (!creds?.email || !creds?.password) return null;
+
+        const result = await postJson<{ access_token?: string; token?: string; user: User }>("/auth/login", {
+          email: String(creds.email).trim(),
+          password: String(creds.password),
+        });
+        const newToken = result.access_token || result.token || (result as any).accessToken;
+        if (newToken) {
+          await storage.secureSet("ticktrack_token", newToken);
+          setToken(newToken);
+          if (result.user) {
+            setUser((prev) => ({ ...(prev || {}), ...result.user }));
+          }
+          return newToken;
         }
-        return newToken;
+      } catch (e) {
+        console.warn("[TickTrack] Silent reauth failed:", e);
+        // The server rejected the saved credentials (wrong password, deactivated or locked account).
+        // Never retry them: every failed login counts toward the 5-attempt lockout. Drop them and
+        // send the user to the sign-in screen instead.
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+          await storage.secureRemove("ticktrack_saved_creds");
+          await storage.secureRemove("ticktrack_token");
+          setToken(null);
+          setUser(null);
+          Alert.alert(
+            "Please sign in again",
+            e.status === 403 ? e.message : "Your session has expired and the saved password was not accepted.",
+          );
+        }
       }
-    } catch (e) {
-      console.warn("[TickTrack] Silent reauth failed:", e);
-    }
-    return null;
+      return null;
+    })();
+    reauthPromiseRef.current = attempt;
+    void attempt.finally(() => {
+      reauthPromiseRef.current = null;
+    });
+    return attempt;
   }, []);
 
   useEffect(() => {
@@ -959,7 +1004,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         try {
           const parsed = typeof cachedTasksRaw === "string" ? JSON.parse(cachedTasksRaw) : cachedTasksRaw;
           if (Array.isArray(parsed) && parsed.length > 0) {
-            setTasks(parsed);
+            setTasks(parsed.map(migrateCachedTask));
           }
         } catch {}
       }
@@ -1181,8 +1226,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       ...(assigneeIdsPayload.length ? { assigneeIds: assigneeIdsPayload } : {}),
       // Recurring series don't store "assigned by" yet, so only one-off tasks send it.
       ...(!isRecurring && payload.assignedById ? { assignedById: String(payload.assignedById) } : {}),
-      // Watchers and escalators, like assignedBy, are stored on one-off tasks only.
-      ...(!isRecurring && Array.isArray(payload.watcherIds) && payload.watcherIds.length ? { watcherIds: (payload.watcherIds as any[]).map(String) } : {}),
+      // Informers and escalators, like assignedBy, are stored on one-off tasks only.
+      ...(!isRecurring && Array.isArray(payload.informerIds) && payload.informerIds.length ? { informerIds: (payload.informerIds as any[]).map(String) } : {}),
       ...(!isRecurring && Array.isArray(payload.escalatorIds) && payload.escalatorIds.length ? { escalatorIds: (payload.escalatorIds as any[]).map(String) } : {}),
     };
 
@@ -1393,7 +1438,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           body.removeDescriptionAudio = true;
         }
         if (payload.assigneeIds !== undefined) body.assigneeIds = payload.assigneeIds;
-        if (payload.watcherIds !== undefined) body.watcherIds = payload.watcherIds;
+        if (payload.informerIds !== undefined) body.informerIds = payload.informerIds;
         if (payload.escalatorIds !== undefined) body.escalatorIds = payload.escalatorIds;
         if (payload.due_date !== undefined) {
           if (payload.due_date) {
@@ -1822,13 +1867,19 @@ export function AppProvider({ children }: PropsWithChildren) {
   };
 
   const loadFollowing = async () => {
-    if (!token) return { watching: [] as Task[], escalations: [] as Task[] };
+    if (!token) return { informed: [] as Task[], escalations: [] as Task[] };
     const [w, e] = await Promise.all([
-      api<{ data?: any[] }>("/activities/watching?limit=100", {}, token).catch(() => null),
+      api<{ data?: any[] }>("/activities/informed?limit=100", {}, token).catch(() => null),
       api<{ data?: any[] }>("/activities/escalations?limit=100", {}, token).catch(() => null),
     ]);
     const parse = (res: any) => ((res?.data ?? []) as any[]).map(normalizeActivity);
-    return { watching: parse(w), escalations: parse(e) };
+    return { informed: parse(w), escalations: parse(e) };
+  };
+
+  const loadEscalations = async () => {
+    if (!token) return [] as Task[];
+    const res = await api<{ data?: any[] }>("/activities/escalations?limit=100", {}, token).catch(() => null);
+    return ((res?.data ?? []) as any[]).map(normalizeActivity);
   };
 
   const escalateTask = async (task: Task, remarks?: string) => {
@@ -2105,6 +2156,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       addRemark,
       loadTaskDetail,
       loadFollowing,
+      loadEscalations,
       escalateTask,
       dismissReminder,
       markNotificationRead,

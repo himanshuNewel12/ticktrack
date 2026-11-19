@@ -75,7 +75,7 @@ export type Task = {
   assignee?: { id: string; firstName?: string | null; lastName?: string | null; email?: string } | null;
   assignees?: { id: string; name: string; email?: string; avatarUrl?: string }[] | null;
   assigneeName?: string | null;
-  watchers?: { id: string; name: string; email?: string }[] | null;
+  informers?: { id: string; name: string; email?: string }[] | null;
   escalators?: { id: string; name: string; email?: string }[] | null;
   isEscalator?: boolean;
   source?: string;
@@ -108,7 +108,7 @@ export type UpdateTaskPayload = {
   due_date?: string | null;
   priority?: string;
   assigneeIds?: string[];
-  watcherIds?: string[];
+  informerIds?: string[];
   escalatorIds?: string[];
   recurrence?: string;
   repeatDays?: number[];

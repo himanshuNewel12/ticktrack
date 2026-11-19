@@ -59,5 +59,17 @@ async function bootstrap() {
   const port = process.env.PORT || 4002;
   await app.listen(port, '0.0.0.0');
   console.log(`Mobile app API running on port ${port} (NODE_ENV=${process.env.NODE_ENV})`);
+  // Must be the same database as the main backend; logged without credentials so the two can be compared.
+  console.log(`Database: ${describeDatabase(process.env.DATABASE_URL)}`);
+}
+
+function describeDatabase(url?: string): string {
+  if (!url) return '(DATABASE_URL not set)';
+  try {
+    const u = new URL(url);
+    return `${u.hostname}:${u.port || '5432'}${u.pathname} (user ${u.username || '?'})`;
+  } catch {
+    return '(DATABASE_URL could not be parsed)';
+  }
 }
 bootstrap();

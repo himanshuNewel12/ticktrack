@@ -14,13 +14,13 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://newelplanner-revamp-api-prod.neweltechnologies.in/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://ticktrack-api.neweltechnologies.com/api/v1"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://newelplanner-revamp-api-prod.neweltechnologies.in/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://ticktrack-api.neweltechnologies.com/api/v1"
       }
     }
   },

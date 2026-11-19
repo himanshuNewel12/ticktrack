@@ -56,7 +56,7 @@
     },
     "extra": {
       "router": {},
-      "backendUrl": "https://newelplanner-revamp-api-prod.neweltechnologies.in/api/v1"
+      "backendUrl": "https://ticktrack-api.neweltechnologies.com/api/v1"
     }
   }
 }

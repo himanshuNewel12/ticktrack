@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
@@ -8,8 +8,16 @@ import { CookieOptions, Response } from 'express';
  * Mobile app auth: login + profile only. Password reset, refresh and logout stay
  * in the main backend. Tokens are signed with the same secrets as the backend.
  */
+/** "jane.doe@newel.com" -> "ja***@newel.com", so logs identify the account without the full address. */
+function maskEmail(email: string): string {
+  const [local = '', domain = ''] = String(email ?? '').split('@');
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -29,15 +37,20 @@ export class AuthService {
       },
     });
 
+    // The client always gets the same "Invalid credentials" (no account enumeration); the server log
+    // records the real reason so a wrong database can be told apart from a wrong password.
     if (!user) {
+      this.logger.warn(`Login failed for ${maskEmail(email)}: no user with this email in the database`);
       throw new UnauthorizedException('Invalid credentials');
     }
 
     if (!user.isActive) {
+      this.logger.warn(`Login refused for ${maskEmail(email)}: account is deactivated`);
       throw new ForbiddenException('Account is deactivated. Please contact your administrator.');
     }
 
     if (user.failedAttempts >= 5) {
+      this.logger.warn(`Login refused for ${maskEmail(email)}: account is locked`);
       throw new ForbiddenException('Account is locked due to multiple failed attempts');
     }
 
@@ -45,6 +58,9 @@ export class AuthService {
 
     if (!isMatch) {
       await this.handleFailedLogin(user);
+      this.logger.warn(
+        `Login failed for ${maskEmail(email)}: wrong password (attempt ${user.failedAttempts + 1}/5)`,
+      );
       throw new UnauthorizedException('Invalid credentials');
     }
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -16,6 +16,10 @@ import { format, formatDistanceToNowStrict } from "date-fns";
 import { useTheme } from "../theme";
 import { useApp } from "../app-context";
 import type { AppNotification, Task } from "../types";
+import { storage } from "../utils/storage";
+
+/** Scroll offset after which the "Latest" shortcut back to the top appears. */
+const SHOW_LATEST_AFTER = 300;
 
 type Props = {
   visible: boolean;
@@ -27,9 +31,53 @@ export function NotificationsModal({ visible, onClose, onSelectTask }: Props) {
   const styles = useStyles();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { notifications, unreadNotificationCount, markNotificationRead, markAllNotificationsRead, tasks, refresh } = useApp();
+  const { user, notifications, unreadNotificationCount, markNotificationRead, markAllNotificationsRead, tasks, refresh } = useApp();
 
   const [refreshing, setRefreshing] = useState(false);
+  const [showLatest, setShowLatest] = useState(false);
+
+  // Resume where the user left off: on open, scroll to the notification right after the one
+  // they last tapped, so they don't have to scroll past everything they already read.
+  const lastOpenedKey = user?.id ? `ticktrack_notif_last_opened_${user.id}` : null;
+  const lastOpenedIdRef = useRef<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const cardY = useRef<Record<string, number>>({});
+  const pendingScrollId = useRef<string | null>(null);
+
+  useEffect(() => {
+    lastOpenedIdRef.current = null;
+    if (!lastOpenedKey) return;
+    void storage.getItem(lastOpenedKey, null as string | null).then((id) => {
+      if (typeof id === "string") lastOpenedIdRef.current = id;
+    });
+  }, [lastOpenedKey]);
+
+  const scrollToPending = () => {
+    const id = pendingScrollId.current;
+    if (!id || cardY.current[id] === undefined) return;
+    pendingScrollId.current = null;
+    // Leave a sliver of the read card above so it's clear where the user is.
+    const y = Math.max(0, cardY.current[id] - 24);
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y, animated: false }));
+  };
+
+  useEffect(() => {
+    if (!visible) {
+      cardY.current = {};
+      pendingScrollId.current = null;
+      return;
+    }
+    const idx = notifications.findIndex((n) => n.id === lastOpenedIdRef.current);
+    // Only once per open; later list refreshes must not yank the scroll position.
+    pendingScrollId.current = idx < 0 ? null : (notifications[idx + 1] ?? notifications[idx]).id;
+    scrollToPending();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  const rememberOpened = (id: string) => {
+    lastOpenedIdRef.current = id;
+    if (lastOpenedKey) void storage.setItem(lastOpenedKey, id);
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -40,7 +88,13 @@ export function NotificationsModal({ visible, onClose, onSelectTask }: Props) {
     }
   };
 
+  const close = () => {
+    setShowLatest(false);
+    onClose();
+  };
+
   const handleNotificationPress = (item: AppNotification) => {
+    rememberOpened(item.id);
     if (!item.isRead) {
       void markNotificationRead(item.id);
     }
@@ -49,7 +103,7 @@ export function NotificationsModal({ visible, onClose, onSelectTask }: Props) {
     if (entityId && onSelectTask) {
       const matched = tasks.find((t) => t.id === entityId);
       if (matched) {
-        onClose();
+        close();
         onSelectTask(matched);
       }
     }
@@ -167,8 +221,8 @@ export function NotificationsModal({ visible, onClose, onSelectTask }: Props) {
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
-      <Pressable onPress={onClose} style={styles.backdrop}>
+    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent onRequestClose={close}>
+      <Pressable onPress={close} style={styles.backdrop}>
         <Pressable
           onPress={() => { /* trap */ }}
           style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}
@@ -197,7 +251,7 @@ export function NotificationsModal({ visible, onClose, onSelectTask }: Props) {
                   <Text style={styles.markAllText}>Mark all read</Text>
                 </Pressable>
               ) : null}
-              <Pressable onPress={onClose} style={styles.closeBtn} testID="close-notifications-btn">
+              <Pressable onPress={close} style={styles.closeBtn} testID="close-notifications-btn">
                 <Ionicons name="close" size={22} color={colors.onSurface} />
               </Pressable>
             </View>
@@ -205,8 +259,15 @@ export function NotificationsModal({ visible, onClose, onSelectTask }: Props) {
 
           {/* List of Notifications */}
           <ScrollView
+            ref={scrollRef}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContent}
+            onContentSizeChange={scrollToPending}
+            scrollEventThrottle={100}
+            onScroll={(e) => {
+              const away = e.nativeEvent.contentOffset.y > SHOW_LATEST_AFTER;
+              if (away !== showLatest) setShowLatest(away);
+            }}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -234,6 +295,10 @@ export function NotificationsModal({ visible, onClose, onSelectTask }: Props) {
                 return (
                   <Pressable
                     key={item.id}
+                    onLayout={(e) => {
+                      cardY.current[item.id] = e.nativeEvent.layout.y;
+                      if (pendingScrollId.current === item.id) scrollToPending();
+                    }}
                     onPress={() => handleNotificationPress(item)}
                     style={({ pressed }) => [
                       styles.notificationCard,
@@ -269,6 +334,18 @@ export function NotificationsModal({ visible, onClose, onSelectTask }: Props) {
               })
             )}
           </ScrollView>
+
+          {/* Shortcut back to the newest notifications after resuming further down the list. */}
+          {showLatest ? (
+            <Pressable
+              testID="notifications-jump-latest"
+              onPress={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
+              style={({ pressed }) => [styles.latestPill, { bottom: insets.bottom + 24 }, pressed && { opacity: 0.85 }]}
+            >
+              <Ionicons name="arrow-up" size={14} color="#FFFFFF" />
+              <Text style={styles.latestPillText}>Latest</Text>
+            </Pressable>
+          ) : null}
         </Pressable>
       </Pressable>
     </Modal>
@@ -348,6 +425,27 @@ function useStyles() {
     listContent: {
       paddingVertical: 10,
       gap: 6,
+    },
+    latestPill: {
+      position: "absolute",
+      alignSelf: "center",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 7,
+      borderRadius: 18,
+      backgroundColor: colors.brandPrimary,
+      shadowColor: "#000",
+      shadowOpacity: 0.15,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 4,
+    },
+    latestPillText: {
+      color: "#FFFFFF",
+      fontSize: 12,
+      fontWeight: "600",
     },
     notificationCard: {
       flexDirection: "row",

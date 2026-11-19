@@ -3,7 +3,7 @@ import { addDays, formatDistanceToNow, isBefore, isSameDay, parseISO, startOfDay
 import { router } from "expo-router";
 import { FollowingView } from "@/src/components/following-view";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
-import { Alert, Animated, ColorValue, Image, Modal, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, Share, Switch, TextInput } from "react-native";
+import { ActivityIndicator, Alert, Animated, ColorValue, Image, Modal, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, Share, Switch, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const isImageUri = (url?: string | null) => {
@@ -94,6 +94,8 @@ export default function TasksScreen() {
     todayAttendance,
     refresh,
     loading,
+    loadEscalations,
+    escalateTask,
   } = useApp();
   const [clockModal, setClockModal] = useState(false);
   const [composer, setComposer] = useState<ComposerKind | null>(null);
@@ -102,20 +104,47 @@ export default function TasksScreen() {
   const [allDatesScope, setAllDatesScope] = useState<"all" | "mine" | "other">("mine");
   const [selectedOtherAssignee, setSelectedOtherAssignee] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
-  // "Watching & Escalations" is a view inside this screen so it shares the header and sidebar.
+  // "Informed & Escalations" is a view inside this screen so it shares the header and sidebar.
   const [showFollowing, setShowFollowing] = useState(false);
   const [menu, setMenu] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [notificationsModal, setNotificationsModal] = useState(false);
 
+  // Tasks where I am an escalator. They are not part of `tasks`, so they are fetched on their
+  // own and shown as an Escalations section in the Today and Next 7 Days views.
+  const [escalationTasks, setEscalationTasks] = useState<Task[]>([]);
+  // Collapse / "view more" are remembered per view (keyed by selection) instead of reset in an effect.
+  const [escalationsCollapsedFor, setEscalationsCollapsedFor] = useState<string | null>(null);
+  const [escalationsExpandedFor, setEscalationsExpandedFor] = useState<string | null>(null);
+  const [escalationDetail, setEscalationDetail] = useState<Task | null>(null);
+  const [escalatingId, setEscalatingId] = useState<string | null>(null);
+  // Ref so the effects below don't re-run every time the context value is rebuilt.
+  const loadEscalationsRef = useRef(loadEscalations);
+  useEffect(() => {
+    loadEscalationsRef.current = loadEscalations;
+  }, [loadEscalations]);
+  const showsEscalations =
+    !showFollowing && selection.kind === "smart" && (selection.key === "today" || selection.key === "next7");
+
+  const reloadEscalations = useCallback(async () => {
+    setEscalationTasks(await loadEscalationsRef.current());
+  }, []);
+
+  useEffect(() => {
+    if (!showsEscalations || !user?.id) return;
+    void reloadEscalations();
+    const timer = setInterval(() => void reloadEscalations(), 20000);
+    return () => clearInterval(timer);
+  }, [showsEscalations, user?.id, reloadEscalations]);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await refresh();
+      await Promise.all([refresh(), showsEscalations ? reloadEscalations() : Promise.resolve()]);
     } finally {
       setRefreshing(false);
     }
-  }, [refresh]);
+  }, [refresh, showsEscalations, reloadEscalations]);
 
   // Periodic background refresh every 20s so new tasks from planner frontend appear automatically
   useEffect(() => {
@@ -515,6 +544,43 @@ export default function TasksScreen() {
     return showAllCompletedToday ? completedTodayTasks.slice(0, expandedCount) : completedTodayTasks.slice(0, 5);
   }, [completedTodayTasks, showAllCompletedToday, expandedCount]);
 
+  // Pending escalation tasks inside the active view's date window, earliest due first.
+  const escalationSectionTasks = useMemo(() => {
+    if (!showsEscalations || selection.kind !== "smart") return [];
+    const inWindow =
+      selection.key === "today" ? (t: Task) => isTaskOverdue(t) || isTaskForToday(t) : isTaskForNext7Days;
+    const due = (t: Task) => parseTaskDate(t.due_date ?? "")?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    return escalationTasks
+      .filter((t) => !t.completed && String(t.status || "PENDING").toUpperCase() === "PENDING" && inWindow(t))
+      .sort((a, b) => due(a) - due(b));
+  }, [escalationTasks, showsEscalations, selection]);
+
+  const showEscalationSection = escalationsCollapsedFor !== selectionKey;
+  const showAllEscalations = escalationsExpandedFor === selectionKey;
+  const displayedEscalationTasks = showAllEscalations ? escalationSectionTasks : escalationSectionTasks.slice(0, 5);
+
+  const confirmEscalate = (task: Task) => {
+    Alert.alert("Escalate task", `Notify the creator and assignees that "${task.title}" needs attention?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Escalate",
+        style: "destructive",
+        onPress: async () => {
+          setEscalatingId(task.id);
+          try {
+            await escalateTask(task);
+            await reloadEscalations();
+            Alert.alert("Escalated", "The task owners have been notified.");
+          } catch (err: any) {
+            Alert.alert("Could not escalate", err?.message || "Please try again.");
+          } finally {
+            setEscalatingId(null);
+          }
+        },
+      },
+    ]);
+  };
+
   const handleShareList = async () => {
     setMenu(false);
     try {
@@ -676,6 +742,52 @@ export default function TasksScreen() {
     />
   );
 
+  const escalationSection =
+    escalationSectionTasks.length > 0 ? (
+      <View style={styles.simpleSectionCard}>
+        <Pressable
+          testID="toggle-escalation-section"
+          onPress={() => setEscalationsCollapsedFor(showEscalationSection ? selectionKey : null)}
+          style={[styles.simpleSectionHeader, showEscalationSection && styles.simpleSectionHeaderExpanded]}
+        >
+          <Text style={styles.simpleSectionTitle}>Escalations</Text>
+          <View style={styles.simpleSectionRight}>
+            <Text style={styles.simpleSectionCount}>{escalationSectionTasks.length}</Text>
+            <Ionicons name={showEscalationSection ? "chevron-down" : "chevron-forward"} size={16} color={colors.muted} />
+          </View>
+        </Pressable>
+
+        {showEscalationSection ? (
+          <View style={styles.simpleSectionBody}>
+            {displayedEscalationTasks.map((task, index) => (
+              <EscalationRow
+                key={task.id}
+                task={task}
+                busy={escalatingId === task.id}
+                onPress={setEscalationDetail}
+                onEscalate={confirmEscalate}
+                isLast={index === displayedEscalationTasks.length - 1 && escalationSectionTasks.length <= 5}
+                styles={styles}
+                colors={colors}
+              />
+            ))}
+            {escalationSectionTasks.length > 5 ? (
+              <Pressable
+                testID="toggle-all-escalations"
+                onPress={() => setEscalationsExpandedFor(showAllEscalations ? null : selectionKey)}
+                style={styles.viewMoreButton}
+              >
+                <Text style={styles.viewMoreButtonText}>
+                  {showAllEscalations ? "Show less" : `View more (${escalationSectionTasks.length - 5} more)`}
+                </Text>
+                <Ionicons name={showAllEscalations ? "chevron-up" : "chevron-down"} size={15} color={colors.brandPrimary} />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+    ) : null;
+
   if (showFollowing) {
     return (
       <View style={styles.screen}>
@@ -683,7 +795,7 @@ export default function TasksScreen() {
           <Pressable testID="open-drawer" onPress={() => setDrawer(true)} style={styles.iconButton}>
             <Ionicons name="menu" size={24} color={colors.onSurface} />
           </Pressable>
-          <Text style={styles.headerTitle} numberOfLines={1}>Watching & Escalations</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>Informed & Escalations</Text>
         </View>
         <FollowingView />
         {drawerSheet}
@@ -1002,9 +1114,10 @@ export default function TasksScreen() {
         ) : (selection.kind === "smart" && selection.key === "today" ? (
           overdueTasks.length === 0 &&
           todayTasks.length === 0 &&
-          completedTodayTasks.length === 0
+          completedTodayTasks.length === 0 &&
+          escalationSectionTasks.length === 0
         ) : (
-          activeTasks.length === 0 && completedTasks.length === 0
+          activeTasks.length === 0 && completedTasks.length === 0 && escalationSectionTasks.length === 0
         )) ? (
           <EmptyState title={activeListDoc ? "No tasks" : activeSmart?.empty.title ?? "No tasks"} copy={activeListDoc ? "Captures all your tasks and ideas" : activeSmart?.empty.copy ?? ""} icon={activeListDoc?.emoji ?? null} styles={styles} colors={colors} />
         ) : (
@@ -1164,6 +1277,8 @@ export default function TasksScreen() {
                   </View>
                 ) : null}
 
+                {escalationSection}
+
                 {/* Completed Marked Today Section (at the last) */}
                 {completedTodayTasks.length > 0 ? (
                   <View style={styles.simpleSectionCard}>
@@ -1236,8 +1351,9 @@ export default function TasksScreen() {
                 ) : null}
               </>
             ) : (
-              /* Regular Tasks Group for other views */
-              regularTasks.length > 0 ? (
+              <>
+              {/* Regular Tasks Group for other views */}
+              {regularTasks.length > 0 ? (
                 <View style={styles.cardGroup}>
                   {displayedRegularTasks.map((task, index) => (
                     <TaskRow
@@ -1287,7 +1403,9 @@ export default function TasksScreen() {
                     </Pressable>
                   ) : null}
                 </View>
-              ) : null
+              ) : null}
+              {escalationSection}
+              </>
             )}
           </>
         )}
@@ -1415,6 +1533,17 @@ export default function TasksScreen() {
         onDelete={deleteTask}
         onPostpone={(t) => setPostponeModalTask(t)}
         onEdit={(t) => setEditModalTask(t)}
+        lists={lists}
+      />
+      {/* Escalation tasks belong to other people, so their detail view is read-only. */}
+      <TaskDetailModal
+        task={escalationDetail}
+        visible={Boolean(escalationDetail)}
+        onClose={() => setEscalationDetail(null)}
+        onToggle={() => {}}
+        onDelete={() => {}}
+        onPostpone={() => {}}
+        onEdit={() => {}}
         lists={lists}
       />
       <TaskEditModal
@@ -1717,6 +1846,58 @@ function ReminderCard({ reminder, onDismiss, styles, colors }: { reminder: Remin
         <Text style={styles.reminderDismissText}>Got it</Text>
       </Pressable>
     </View>
+  );
+}
+
+// A task I may escalate: view-only (no complete/delete), with an Escalate action.
+function EscalationRow({
+  task,
+  busy,
+  onPress,
+  onEscalate,
+  isLast,
+  styles,
+  colors,
+}: {
+  task: Task;
+  busy: boolean;
+  onPress: (task: Task) => void;
+  onEscalate: (task: Task) => void;
+  isLast?: boolean;
+  styles: ReturnType<typeof useStyles>;
+  colors: ReturnType<typeof useTheme>["colors"];
+}) {
+  const due = formatTaskDueDateDisplay(task.due_date);
+  return (
+    <Pressable
+      testID={`escalation-row-${task.id}`}
+      onPress={() => onPress(task)}
+      style={({ pressed }) => [styles.escalationRow, !isLast && styles.escalationRowDivider, pressed && { opacity: 0.75 }]}
+    >
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={2} style={styles.escalationTitle}>{task.title}</Text>
+        <Text numberOfLines={1} style={styles.escalationMeta}>
+          {task.assigneeName ? `To ${task.assigneeName}` : "Unassigned"}
+          {due ? <Text style={isTaskOverdue(task) ? styles.escalationOverdue : null}>{` · ${due}`}</Text> : null}
+        </Text>
+      </View>
+      <Pressable
+        testID={`escalate-${task.id}`}
+        onPress={() => onEscalate(task)}
+        disabled={busy}
+        hitSlop={6}
+        style={({ pressed }) => [styles.escalateButton, pressed && { opacity: 0.8 }]}
+      >
+        {busy ? (
+          <ActivityIndicator size="small" color={colors.onBrandPrimary} />
+        ) : (
+          <>
+            <Ionicons name="arrow-up-circle-outline" size={15} color={colors.onBrandPrimary} />
+            <Text style={styles.escalateButtonText}>Escalate</Text>
+          </>
+        )}
+      </Pressable>
+    </Pressable>
   );
 }
 
@@ -2348,7 +2529,7 @@ function DrawerSheet(props: {
                       />
                     </View>
                     <Text style={[styles.drawerLabel, { flex: 1 }, followingActive && styles.drawerLabelActive]}>
-                      Watching & Escalations
+                      Informed & Escalations
                     </Text>
                   </Pressable>
                 );
@@ -2951,6 +3132,43 @@ const useStyles = makeStyles((colors) => ({
   },
   simpleSectionBody: {
     paddingTop: 2,
+  },
+  escalationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 12,
+  },
+  escalationRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  escalationTitle: {
+    color: colors.onSurface,
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  escalationMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  escalationOverdue: {
+    color: "#EF4444",
+  },
+  escalateButton: {
+    minHeight: 34,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: colors.brandPrimary,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  escalateButtonText: {
+    color: colors.onBrandPrimary,
+    fontSize: 12,
+    fontWeight: "600",
   },
 
   /* Overdue Box — highlighted card container on top */

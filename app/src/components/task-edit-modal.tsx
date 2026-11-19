@@ -74,7 +74,7 @@ export function TaskEditModal({ task, visible, onClose, onSave }: Props) {
   const [repeatDays, setRepeatDays] = useState<number[]>([]);
   const [priority, setPriority] = useState<"high" | "medium" | "low" | "none">("medium");
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
-  const [watcherIds, setWatcherIds] = useState<string[]>([]);
+  const [informerIds, setInformerIds] = useState<string[]>([]);
   const [escalatorIds, setEscalatorIds] = useState<string[]>([]);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -111,7 +111,7 @@ export function TaskEditModal({ task, visible, onClose, onSave }: Props) {
         ? [task.assigneeId]
         : [];
       setAssigneeIds(Array.from(new Set(rawIds.map(String).filter(Boolean))));
-      setWatcherIds(Array.from(new Set((task.watchers ?? []).map((w) => String(w.id)).filter(Boolean))));
+      setInformerIds(Array.from(new Set((task.informers ?? []).map((w) => String(w.id)).filter(Boolean))));
       setEscalatorIds(Array.from(new Set((task.escalators ?? []).map((e) => String(e.id)).filter(Boolean))));
 
       // Normalize due date & time
@@ -155,7 +155,7 @@ export function TaskEditModal({ task, visible, onClose, onSave }: Props) {
   // Voice descriptions exist on one-off activities only (not project tasks or repeating series).
   const voiceAllowed = task?.source === "activity" && !task.id.startsWith("recurrence_") && repeat === "none";
 
-  // Watchers and escalators live on one-off activities only (same rule as the composer).
+  // Informers and escalators live on one-off activities only (same rule as the composer).
   const rolesAllowed = task?.source === "activity" && !task.id.startsWith("recurrence_") && repeat === "none";
 
   const handleSave = async () => {
@@ -182,7 +182,7 @@ export function TaskEditModal({ task, visible, onClose, onSave }: Props) {
         due_date: dueIso,
         priority: priority === "none" ? "medium" : priority,
         assigneeIds,
-        ...(rolesAllowed ? { watcherIds, escalatorIds } : {}),
+        ...(rolesAllowed ? { informerIds, escalatorIds } : {}),
         recurrence: repeat,
         repeatDays: (repeat === "weekly" || repeat === "fortnightly") ? repeatDays : [],
       });
@@ -495,7 +495,7 @@ export function TaskEditModal({ task, visible, onClose, onSave }: Props) {
         selectedIds={assigneeIds}
         onSelect={(ids) => setAssigneeIds(ids)}
         {...(rolesAllowed
-          ? { watcherIds, escalatorIds, onSelectWatchers: setWatcherIds, onSelectEscalators: setEscalatorIds }
+          ? { informerIds, escalatorIds, onSelectInformers: setInformerIds, onSelectEscalators: setEscalatorIds }
           : {})}
         onClose={() => setAssigneeOpen(false)}
       />

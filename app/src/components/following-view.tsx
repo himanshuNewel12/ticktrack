@@ -8,17 +8,17 @@ import { useApp } from "@/src/app-context";
 import { makeStyles, useTheme } from "@/src/theme";
 import type { Task } from "@/src/types";
 
-type Tab = "watching" | "escalations";
+type Tab = "informed" | "escalations";
 
-/** Body of the "Watching & Escalations" view. The Tasks screen supplies the header and sidebar around it. */
+/** Body of the "Informed & Escalations" view. The Tasks screen supplies the header and sidebar around it. */
 export function FollowingView() {
   const styles = useStyles();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { loadFollowing, escalateTask, lists } = useApp();
 
-  const [tab, setTab] = useState<Tab>("watching");
-  const [data, setData] = useState<{ watching: Task[]; escalations: Task[] }>({ watching: [], escalations: [] });
+  const [tab, setTab] = useState<Tab>("informed");
+  const [data, setData] = useState<{ informed: Task[]; escalations: Task[] }>({ informed: [], escalations: [] });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [detail, setDetail] = useState<Task | null>(null);
@@ -60,7 +60,7 @@ export function FollowingView() {
     ]);
   };
 
-  const items = tab === "watching" ? data.watching : data.escalations;
+  const items = tab === "informed" ? data.informed : data.escalations;
 
   const renderItem = ({ item }: { item: Task }) => {
     const pending = !item.completed && String(item.status || "PENDING").toUpperCase() === "PENDING";
@@ -102,7 +102,7 @@ export function FollowingView() {
       <View style={styles.tabsContainer}>
         <View style={styles.segmentedControl}>
           {([
-            ["watching", "Watching", data.watching.length],
+            ["informed", "Informed", data.informed.length],
             ["escalations", "Escalations", data.escalations.length],
           ] as [Tab, string, number][]).map(([key, label, count]) => {
             const active = tab === key;
@@ -138,10 +138,10 @@ export function FollowingView() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandPrimary} />}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Ionicons name={tab === "watching" ? "eye-outline" : "arrow-up-circle-outline"} size={28} color={colors.muted} />
+              <Ionicons name={tab === "informed" ? "information-circle-outline" : "arrow-up-circle-outline"} size={28} color={colors.muted} />
               <Text style={styles.emptyText}>
-                {tab === "watching"
-                  ? "Tasks you watch will show here. You're told when they're completed or cancelled."
+                {tab === "informed"
+                  ? "Tasks where you were made an informer will show here. You're told when they're completed or cancelled."
                   : "Tasks where you were made an escalator will show here."}
               </Text>
             </View>

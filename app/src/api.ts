@@ -16,7 +16,7 @@ function getHostIp(): string | null {
   return null;
 }
 
-const DEFAULT_REMOTE_URL = "https://newelplanner-revamp-api-prod.neweltechnologies.in/api/v1";
+const DEFAULT_REMOTE_URL = "https://ticktrack-api.neweltechnologies.com/api/v1";
 
 function resolveBaseUrl(): string {
   const rawUrl = (
@@ -48,10 +48,10 @@ function resolveBaseUrl(): string {
       if (rawUrl) {
         return rawUrl.replace(/localhost|127\.0\.0\.1/, detectedIp);
       }
-      return `http://${detectedIp}:4001/api/v1`;
+      return `http://${detectedIp}:4002/api/v1`;
     }
     // Fall back to current local network IP
-    return rawUrl ? rawUrl.replace(/localhost|127\.0\.0\.1/, "10.34.136.52") : "http://10.34.136.52:4001/api/v1";
+    return rawUrl ? rawUrl.replace(/localhost|127\.0\.0\.1/, "10.34.136.52") : "http://10.34.136.52:4002/api/v1";
   }
 
   if (rawUrl.includes("localhost") || rawUrl.includes("127.0.0.1")) {
@@ -61,12 +61,20 @@ function resolveBaseUrl(): string {
     return rawUrl;
   }
 
-  return rawUrl || "http://localhost:4001/api/v1";
+  return rawUrl || "http://localhost:4002/api/v1";
 }
 
 const baseUrl = resolveBaseUrl();
 if (__DEV__) {
   console.log("[TickTrack API] Target URL:", baseUrl);
+}
+
+/** Error for a non-2xx response; `status` lets callers tell a rejection (401/403) from a network blip. */
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
 }
 
 export type AuthErrorHandler = () => void;
@@ -184,7 +192,9 @@ export async function api<T>(path: string, options: RequestInit = {}, token?: st
   }
 
   if (!ok) {
-    if (status === 401 && globalAuthErrorHandler) {
+    // A 401 from /auth/* (e.g. a wrong password on login) is not an expired session; firing the
+    // re-auth handler for it would retry the login and burn the server's 5-attempt lockout.
+    if (status === 401 && globalAuthErrorHandler && !normalizedPath.startsWith("/auth/")) {
       globalAuthErrorHandler();
     }
     const message = Array.isArray(body.message)
@@ -193,7 +203,7 @@ export async function api<T>(path: string, options: RequestInit = {}, token?: st
     if (__DEV__) {
       console.warn(`[TickTrack API Error] ${options.method || "GET"} ${targetUrl} (${status}):`, message);
     }
-    throw new Error(message);
+    throw new ApiError(message, status);
   }
 
   if (typeof body === "object" && body !== null) {

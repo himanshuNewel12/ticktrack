@@ -91,7 +91,7 @@ export function TaskComposer({ kind, onClose, defaultDue, defaultListId, default
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
-  const [watcherIds, setWatcherIds] = useState<string[]>([]);
+  const [informerIds, setInformerIds] = useState<string[]>([]);
   const [escalatorIds, setEscalatorIds] = useState<string[]>([]);
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -104,7 +104,7 @@ export function TaskComposer({ kind, onClose, defaultDue, defaultListId, default
         setTitle(""); setNotes(""); setVoice(null); setDueDate(defaultDue ?? null); setDueTime(null); setDueEndTime(null);
         setPriority("none"); setRecurrence("none"); setRepeatDays([]); setReminders(["15_mins_before"]);
         setAssigneeIds(defaultAssigneeIds ?? []);
-        setWatcherIds([]);
+        setInformerIds([]);
         setEscalatorIds([]);
         setAssignedById(null);
         setListId(defaultListId ?? lists.find((item) => item.system)?.id ?? lists[0]?.id ?? null);
@@ -165,7 +165,7 @@ export function TaskComposer({ kind, onClose, defaultDue, defaultListId, default
         notes,
         ...(remark.trim() && recurrence === "none" ? { remark: remark.trim() } : {}),
         ...(files.length && recurrence === "none" ? { attachments: files } : {}),
-        ...(recurrence === "none" && watcherIds.length ? { watcherIds } : {}),
+        ...(recurrence === "none" && informerIds.length ? { informerIds } : {}),
         ...(recurrence === "none" && escalatorIds.length ? { escalatorIds } : {}),
         ...(voice && recurrence === "none" ? { voice } : {}),
         due_date: dueIso,
@@ -372,7 +372,7 @@ export function TaskComposer({ kind, onClose, defaultDue, defaultListId, default
 
       <PriorityPopup visible={priorityOpen} current={priority} onSelect={(value) => setPriority(value)} onClose={() => setPriorityOpen(false)} />
       <ListPopup visible={listOpen} lists={lists} currentId={listId} onSelect={(id) => setListId(id)} onCreate={async (name) => { const created = await addList({ name, emoji: "📁" }); setListId(created.id); }} onClose={() => setListOpen(false)} />
-      <AssigneeModal visible={assigneeOpen} assignableUsers={assignableUsers} selectedIds={assigneeIds} onSelect={(ids) => setAssigneeIds(ids)} watcherIds={watcherIds} escalatorIds={escalatorIds} onSelectWatchers={setWatcherIds} onSelectEscalators={setEscalatorIds} onClose={() => setAssigneeOpen(false)} />
+      <AssigneeModal visible={assigneeOpen} assignableUsers={assignableUsers} selectedIds={assigneeIds} onSelect={(ids) => setAssigneeIds(ids)} informerIds={informerIds} escalatorIds={escalatorIds} onSelectInformers={setInformerIds} onSelectEscalators={setEscalatorIds} onClose={() => setAssigneeOpen(false)} />
       <AssigneeModal
         visible={assignedByOpen}
         title="Assigned By"
@@ -1001,9 +1001,9 @@ export function AssigneeModal({
   onClose,
   title = "Assign Task",
   single = false,
-  watcherIds = [],
+  informerIds = [],
   escalatorIds = [],
-  onSelectWatchers,
+  onSelectInformers,
   onSelectEscalators,
 }: {
   visible: boolean;
@@ -1015,10 +1015,10 @@ export function AssigneeModal({
   title?: string;
   /** Pick at most one person (used for "Assigned by"). */
   single?: boolean;
-  /** Passing both role callbacks turns on the Assign / Watcher / Escalator tabs. */
-  watcherIds?: string[];
+  /** Passing both role callbacks turns on the Assign / Informer / Escalator tabs. */
+  informerIds?: string[];
   escalatorIds?: string[];
-  onSelectWatchers?: (ids: string[]) => void;
+  onSelectInformers?: (ids: string[]) => void;
   onSelectEscalators?: (ids: string[]) => void;
 }) {
   const styles = useStyles();
@@ -1064,17 +1064,17 @@ export function AssigneeModal({
   const [searchQuery, setSearchQuery] = useState("");
   const [usersList, setUsersList] = useState<AssignableUser[]>(assignableUsers);
   const [loading, setLoading] = useState(false);
-  const rolesEnabled = Boolean(onSelectWatchers && onSelectEscalators);
-  type RoleTab = "assignee" | "watcher" | "escalator";
+  const rolesEnabled = Boolean(onSelectInformers && onSelectEscalators);
+  type RoleTab = "assignee" | "informer" | "escalator";
   const [tab, setTab] = useState<RoleTab>("assignee");
   const [selections, setSelections] = useState<Record<RoleTab, string[]>>({
     assignee: selectedIds,
-    watcher: watcherIds,
+    informer: informerIds,
     escalator: escalatorIds,
   });
   const localSelectedIds = selections[tab];
   const emit = (role: RoleTab, ids: string[]) => {
-    if (role === "watcher") onSelectWatchers?.(ids);
+    if (role === "informer") onSelectInformers?.(ids);
     else if (role === "escalator") onSelectEscalators?.(ids);
     else onSelect(ids);
   };
@@ -1088,7 +1088,7 @@ export function AssigneeModal({
     if (visible && !wasVisible) {
       setSearchQuery("");
       setTab("assignee");
-      setSelections({ assignee: selectedIds, watcher: watcherIds, escalator: escalatorIds });
+      setSelections({ assignee: selectedIds, informer: informerIds, escalator: escalatorIds });
       if (usersList.length === 0 && assignableUsers.length > 0) {
         setUsersList(assignableUsers);
       }
@@ -1135,7 +1135,7 @@ export function AssigneeModal({
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   useEffect(() => {
     if (!visible) return;
-    setPinnedIds(tab === "watcher" ? watcherIds : tab === "escalator" ? escalatorIds : selectedIds);
+    setPinnedIds(tab === "informer" ? informerIds : tab === "escalator" ? escalatorIds : selectedIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, tab]);
 
@@ -1234,7 +1234,7 @@ export function AssigneeModal({
             <View style={{ flexDirection: "row", marginBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.divider }}>
               {([
                 ["assignee", "Assign"],
-                ["watcher", "Watcher"],
+                ["informer", "Informer"],
                 ["escalator", "Escalator"],
               ] as [RoleTab, string][]).map(([key, label]) => {
                 const active = tab === key;
